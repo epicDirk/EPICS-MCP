@@ -10,6 +10,9 @@ from typing import Protocol
 
 import pytest
 
+import epics_mcp.config as config_module
+import epics_mcp.olog_safety as olog_safety_module
+import epics_mcp.safety as safety_module
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import RateLimitError
 from epics_mcp.safety import SafetyLayer
@@ -21,6 +24,7 @@ from tests.engine_gate import (
     engine_available,
     engine_collection_decision,
 )
+from tests.env_isolation import server_config_names
 
 # A safe default for the BLAS thread arena, so the suite no longer depends on the caller
 # remembering a prefix (see CONTRIBUTING.md, the dev-setup section, for the symptom and the
@@ -127,8 +131,8 @@ def pytest_report_header(decision: str = _DECISION) -> list[str] | None:
 # isolation, posture tests would measure the MACHINE (a developer's EPICS_PVA_ADDR_LIST or
 # EPICS_PVA_NAME_SERVERS leaks into the assertion) instead of the code. No test in this suite
 # legitimately consumes a pre-set search var (measured: zero hits across tests/); a test that
-# needs one sets it explicitly via monkeypatch. The live REST modules key on EPICS_MCP_* URLs,
-# which are untouched here.
+# needs one sets it explicitly via monkeypatch. The server's own EPICS_MCP_* settings are the
+# second fixture below (GQ-399); the live REST modules keep theirs, see tests/env_isolation.py.
 
 _EPICS_SEARCH_ENV_VARS = (
     "EPICS_PVA_ADDR_LIST",
@@ -145,6 +149,43 @@ def _isolate_epics_search_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip the EPICS search-path vars so posture assertions measure the code, not the machine."""
     for var in _EPICS_SEARCH_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_server_config_env(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GQ-399: strip the shell's ``EPICS_MCP_*`` server settings so a test measures the code.
+
+    Which names, and the two named exceptions (the harness family, and every test marked ``live``),
+    are decided in :func:`tests.env_isolation.server_config_names`; this fixture only applies the
+    decision. A test that needs a setting states it with ``monkeypatch.setenv`` or an explicit
+    ``EpicsConfig``, both of which run after this.
+    """
+    live = request.node.get_closest_marker("live") is not None
+    for name in server_config_names(os.environ, live=live):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_singletons() -> Iterator[None]:
+    """GQ-399: ``get_config()`` memoises ONE ``EpicsConfig`` for the process, and the two write
+    gates memoise one object each, built FROM it. Reset all three around every test so what a test
+    reads is built from the environment that test sees, never from the one an earlier test had
+    patched. Without it the strip above would decide nothing for a test that inherits a singleton
+    built before it ran; ``tests/test_resources.py`` used to carry the config half for itself, and
+    the gate halves are what a live write probe leaves behind for the offline tests after it.
+    Neither gate module reaches a BLAS carrier (``test_conftest_import_closure.py`` holds that for
+    every import above), so both are imported plainly."""
+
+    def reset() -> None:
+        config_module._config = None
+        safety_module._safety = None
+        olog_safety_module._olog_safety = None
+
+    reset()
+    yield
+    reset()
 
 
 @pytest.fixture(autouse=True)

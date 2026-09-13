@@ -369,6 +369,14 @@ out-of-range value and a logbook that must be REFUSED (`..._WRITE_PV`, `..._WRIT
 `.env.example`, which documents the SERVER, not the suite; the test module that reads each one is
 the place its meaning is written down.
 
+What you export for a live run does not reach the offline tests through the environment:
+`tests/conftest.py` strips every `EPICS_MCP_*` server setting before each test and rebuilds the
+config, safety and Olog-gate singletons, so a sandbox rate limit or allowlist in your shell cannot
+turn an unrelated test red. Two exceptions, decided in `tests/env_isolation.py` with the reason for
+each: the harness family (the remainders `epics_mcp.config._RESERVED_ENV_REMAINDER_PREFIXES`
+reserves, `EPICS_MCP_LIVE_*` among them), and every test marked `live`, which measures the stack
+you configured and therefore keeps the plane URLs and every other setting you exported.
+
 The PV read probes need one thing the REST planes do not: a **search lane**. `tests/conftest.py`
 strips the six EPICS search variables before every test so posture assertions measure the code
 rather than the machine, which also removes the route to any IOC. `tests/test_read_live.py`
