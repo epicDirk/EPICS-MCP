@@ -754,8 +754,8 @@ async def find_channels(
     {enabled, channels, total, capped}, configured count = {enabled, match_count}; with
     ChannelFinder UNCONFIGURED it is {enabled, channels, total, note} and
     {enabled, match_count, note}, i.e. `note` is added and `capped` is NOT emitted. Only
-    `enabled` is present on every path; read the advertised outputSchema rather than assuming a
-    field is there.
+    `enabled` and `reach` are present on every path, so check that any other field is there
+    before reading it.
 
     The glob is matched by the SERVER, and both of its properties bite silently (measured live
     2026-07-15). It is ANCHORED: 'Ctrl-EVR-01' matches 0 channels while '*Ctrl-EVR-01*' matches

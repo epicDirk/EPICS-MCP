@@ -3290,8 +3290,9 @@ async def test_stripped_tool_still_returns_structured_content(
 # machine-readable (the core value of S29) and cost only ~1% more context per agent turn, so the
 # tools we need anyway may be typed freely. The guard is now a SOFT catastrophe-ceiling: it no
 # longer bounds each tool's growth, only trips on an extreme accidental blow-up. It stays
-# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-05 after GQ-297: the
-# core lane is 78_361 and the full lane 92_446, +974 each against the pair before it. Measured
+# RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-13 after GQ-224: the core
+# lane is 78_360 and the full lane 92_445 (the docstring below splits the steps). Measured
+# 2026-09-05 after GQ-297 it was 78_361 / 92_446, +974 each against the pair before it. Measured
 # THREE times, and the last one is the recorded one, which is the whole reason this comment says
 # "ANY change that can reach the wire" rather than "any code change": the post-build QA replaced
 # two sentences of that same description, one false at exactly ceiling-many hits and one that
@@ -3344,9 +3345,12 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_361 and the full lane
-    92_446, re-measured 2026-09-05 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 78_360 and the full lane
+    92_445, re-measured 2026-09-13 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
+    GQ-224 moved both lanes by -1 in its first step: the ``find_channels`` sentence that sent a
+    caller to the advertised output schema, which the host measurably does not deliver, now names
+    ``enabled`` and ``reach`` as present on every path instead.
     GQ-297 added +974 / +974, all of it on ``search_logbook`` and therefore on both lanes: the new
     ``total_matches_capped`` property plus the description paragraph explaining a saturated
     ``total_matches``. Before it, GQ-231 added +1 / +1 (a re-wrapped size sentence, one space
