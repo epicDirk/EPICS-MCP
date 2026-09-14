@@ -840,6 +840,13 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     # a parallel window's work. Measured before this existed: a foreign write during the mutant
     # run was overwritten silently and the sweep still reported success.
     written: dict[Path, bytes] = {}
+    # Every file a restore was REFUSED for, and it decides the exit code on its own. The drift
+    # check below looks only at the module of the CURRENT target and only before its next
+    # polarity, so a foreign write during the LAST mutant run, or into a module the sweep had
+    # already finished, was seen by this closure alone. Measured before this set existed
+    # (GQ-402): both cases printed the refusal, then the full result table, and exited 0 with the
+    # foreign bytes on disk, a clean bill of health for a tree that needed inspecting by hand.
+    refused: set[Path] = set()
 
     def restore_all() -> None:
         for path, data in originals.items():
@@ -847,6 +854,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             if hashlib.sha256(current).hexdigest() == baseline[path]:
                 continue
             if current != written.get(path):
+                refused.add(path)
                 sys.stderr.write(
                     f"REFUSING to restore {path.name}: on-disk bytes are neither the baseline nor "
                     f"what this sweep wrote, a foreign write. Left untouched ON PURPOSE; the "
@@ -901,6 +909,13 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
     for target, applied, verdict in results:
         sys.stderr.write(f"{target.key:44s} {target.form:16s} {applied:5s} {verdict}\n")
+    if refused:
+        # 3, the code the drift abort already uses: whoever reads it must look at the working
+        # tree now. The table above still stands, because its verdicts were reached on the sweep's
+        # own mutants; what it cannot vouch for is the state it left behind.
+        names = ", ".join(sorted(path.name for path in refused))
+        sys.stderr.write(f"FOREIGN WRITE: restore refused for {names}; inspect them. Exit 3.\n")
+        return 3
     return 0
 
 

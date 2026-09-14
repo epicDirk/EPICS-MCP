@@ -115,8 +115,9 @@ def test_check_with_a_database_compares_the_coverage_pins_too(
 
     Honest limit, because the substitution below is easy to over-read: it replaces
     ``load_coverage_map``, so what is exercised is its CONSUMER. The reader itself, which must
-    query the ``arc`` table, since ``line_bits`` yields a silently empty map, is still covered by
-    no test at all.
+    query the ``arc`` table, since ``line_bits`` yields a silently empty map, is exercised in
+    ``tests/test_guard_audit_sweep.py`` against a database coverage wrote (GQ-402); until then it
+    ran in no test at all.
     """
     # A real member of the claiming population, and one that carries payload vocabulary, so
     # excluding it must move BOTH coverage figures by exactly one. If it ever leaves the population
