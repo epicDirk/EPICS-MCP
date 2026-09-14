@@ -211,6 +211,11 @@ you a green run. Why CI itself cannot execute them, and where their coverage com
     figure being measured that nothing pins. Re-measure with
     `uv run python scripts/guard_audit.py sham --check`. That verdict was reached
     by a person reading a list, so a longer list has not been read: re-read it, then re-record.
+    ⚠️ In `tests/test_doctor.py` that is EVERY new test: the module's autouse fixture replaces a
+    client class for all of them, so each one moves the population, and one whose name or
+    docstring carries payload vocabulary also changes the candidate list the `sham-audit` job
+    compares. `uv run python scripts/guard_audit.py sham --list-candidates` prints each candidate
+    with the route that put it there.
 - **After any change to a client module or a client-double test:** the coverage-dependent half of
   the sham audit is re-checked for you. The `sham-audit` job of `.github/workflows/ci.yml` records
   a `COVERAGE_CORE=ctrace` map on every push and runs

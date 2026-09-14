@@ -131,8 +131,22 @@ def test_check_with_a_database_compares_the_coverage_pins_too(
         "arithmetic assumes it is. Pick another member of the population."
     )
 
+    # A second member with vocabulary, covered on a line that is NOT a guard line. It must stay a
+    # candidate: "executes a client edge" means a GUARD line, and without this key the filter that
+    # says so could be deleted with every test green (QA of GQ-403). The line is derived, not typed.
+    elsewhere = "tests/test_olog.py::test_unreadable_levels_lookup_says_so_and_keeps_the_result"
+    assert claimed.get(elsewhere.rsplit("::", 1)[1]) is True, f"{elsewhere} left the population"
+    guard_lines = {
+        t.lineno for t in guard_audit.enumerate_targets() if t.module == "olog_client.py"
+    }
+    not_a_guard = next(line for line in range(1, 10_000) if line not in guard_lines)
     monkeypatch.setattr(
-        guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 181): {covering}}
+        guard_audit,
+        "load_coverage_map",
+        lambda _path: {
+            ("olog_client.py", 181): {covering},
+            ("olog_client.py", not_a_guard): {elsewhere},
+        },
     )
     counted = guard_audit.population()
     # The deviation is MANUFACTURED, not hoped for. The first version of this test asserted exit 1
@@ -212,7 +226,8 @@ def test_a_run_with_a_map_says_it_checked_all_six_pins(
     coverage figures equal their AST twins. Until GQ-403 that was also what the recorded pins said.
     Since then it is not: the population follows helpers and fixtures, and 25 of its tests execute
     a guard line on the real map (measured 2026-09-14), so the recorded coverage figures sit below
-    their twins and no synthetic map can reproduce them without that real map. The coverage pins
+    their twins, and a synthetic map could reproduce them only by copying the names of the 25
+    from the real map, which would tie this test to that map. The coverage pins
     and the candidate list are therefore moved to what THIS map yields; the subject here is the
     count in the verdict line, and the values are exercised by the tests above that manufacture a
     deviation.
@@ -293,9 +308,15 @@ def test_a_coverage_context_is_matched_by_file_and_function(
     Three properties, each driven through ``cmd_sham`` rather than asserted on a helper alone: the
     phase suffix is removed and the embedded pipe survives; a parametrised id still identifies its
     function; and the same function name in a DIFFERENT file is a different test.
+
+    Two impostors since GQ-403, because the identity keeps the class now: the one inside a class
+    differs in its test id as well as its file, so a matcher that ignored the FILE would still tell
+    it apart. The one without a class differs in the file alone, and it is the one that proves the
+    file half (QA of GQ-403).
     """
     mine = "tests/test_olog.py::test_search_bad_time_is_not_a_connection_error[level-'|']"
     impostor = "tests/test_olog_update.py::TestServiceUpdate::" + mine.rpartition("::")[2]
+    file_only_impostor = "tests/test_not_olog.py::" + mine.rpartition("::")[2]
     assert guard_audit._node_id_of(f"{mine}|run") == mine, "the phase is the LAST segment"
     assert guard_audit.test_identity(mine) == (
         "test_olog.py",
@@ -304,7 +325,11 @@ def test_a_coverage_context_is_matched_by_file_and_function(
     assert guard_audit.test_identity(impostor)[0] == "test_olog_update.py"
 
     counted = guard_audit.population()[guard_audit.DOUBLES]
-    for context, expected in ((mine, counted - 1), (impostor, counted)):
+    for context, expected in (
+        (mine, counted - 1),
+        (impostor, counted),
+        (file_only_impostor, counted),
+    ):
         monkeypatch.setattr(
             guard_audit,
             "load_coverage_map",
@@ -392,6 +417,39 @@ def test_the_candidate_list_is_pinned_by_its_members_not_only_its_length(
     assert "PIN DEVIATION" not in reported, "the counts agree; it is the membership that does not"
 
 
+def test_the_recorded_candidates_and_coverage_figures_fit_the_ast_population() -> None:
+    """What the ordinary gate can still hold about the coverage pins without a map (QA of GQ-403).
+
+    Until GQ-403 two tests held, implicitly, that the coverage figures equal their AST twins and
+    that the candidate list IS the vocabulary list. Both stopped being true, and those tests now set
+    the pins to what their synthetic map yields, so without this test a candidate spelled wrongly (a
+    name without its class, as four were before GQ-403) or a coverage figure out of range would
+    reach CI's ``sham-audit`` job first. What holds without a map: every recorded candidate is a
+    claiming test with vocabulary, listed once, and there are as many as the pin says; and the
+    tests that execute a guard line cannot be fewer among those with vocabulary than zero or more
+    than among all of them.
+    """
+    vocabulary = {
+        f"{file}::{test_id}"
+        for file, entries in guard_audit.claiming_tests().items()
+        for test_id, edge in entries
+        if edge
+    }
+    recorded = guard_audit.PINNED_CANDIDATES
+    assert set(recorded) <= vocabulary, sorted(set(recorded) - vocabulary)
+    assert len(set(recorded)) == len(recorded), "a candidate is recorded twice"
+    assert len(recorded) == guard_audit.PINNED_COVERAGE[guard_audit.SHAM_CANDIDATES]
+    executing = (
+        guard_audit.PINNED_AST[guard_audit.DOUBLES]
+        - guard_audit.PINNED_COVERAGE[guard_audit.NOT_EXECUTING]
+    )
+    executing_with_vocabulary = (
+        guard_audit.PINNED_AST[guard_audit.EDGE_VOCABULARY]
+        - guard_audit.PINNED_COVERAGE[guard_audit.SHAM_CANDIDATES]
+    )
+    assert 0 <= executing_with_vocabulary <= executing
+
+
 def test_the_candidate_list_is_printable_without_a_database(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -406,6 +464,16 @@ def test_the_candidate_list_is_printable_without_a_database(
     assert "COVERAGE_CORE=ctrace" not in reported, "the cheap path must not demand the map"
     listed = [line.strip() for line in reported.splitlines() if "::" in line]
     assert len(listed) == guard_audit.population()[guard_audit.EDGE_VOCABULARY]
+    # The ROUTE beside each name is what a reader judges a candidate by since GQ-403, so it is
+    # compared line by line with what the audit computed, and one known line is spelled out.
+    routes = guard_audit.claiming_routes()
+    for line in listed:
+        name, _sep, bracket = line.partition("  [")
+        file, _sep, test_id = name.partition("::")
+        assert bracket.endswith("]"), line
+        assert tuple(bracket[:-1].split(", ")) == routes[(file, test_id)], line
+    known = "test_doctor.py::test_classify_retry_error_is_api_error"
+    assert f"{known}  [autouse _identity_never_touches_the_network]" in listed
     assert guard_audit.RERUN_AST.startswith("re-read the candidate list (sham --list-candidates")
 
 

@@ -25,7 +25,8 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   audit can be joined against a known registry offline, and every test the GQ-403 widening added.
   They stay in that position until the sweep is re-run, which is what the guard below exists to
   keep visible. 91 of those also carry payload vocabulary, and every one that executes no guard
-  line was read (the first set on 2026-07-25, the GQ-403 additions on 2026-09-14): they claim
+  line was read (the first set on 2026-07-25, the two BG-DTHR tests on 2026-08-19, the GQ-403
+  additions on 2026-09-14; each group's reading is a comment in ``PINNED_CANDIDATES``): they claim
   SERVICE-layer or doctor-level behaviour (an already-constructed exception must not be relabelled
   "unreachable"; an unknown level is refused before any request is built; a plane refused by this
   command's own read throttle is reported as unmeasured rather than as unreachable; a doctor
@@ -41,8 +42,10 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
   coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
-  ⚠️ Every figure in this bullet moved on 2026-07-26, and the uniformity it then showed, the same
-  figure before and after the map, was the RESULT of
+  ⚠️ The figures this bullet carried moved on 2026-07-26, and again with GQ-403 on 2026-09-14
+  for the reason given above (the history is in the comments of ``guard_audit.PINNED_AST``). The
+  uniformity they showed after the first move, the same figure before and after the map, was the
+  RESULT of
   three separate measurement defects being removed, not a change in the code under audit: the
   population read the function's SOURCE TEXT (a docstring quoting the idiom counted, and so did a
   method patch on a helper-installed double), and the coverage matcher compared node ids with
@@ -413,7 +416,9 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     * RE-MEASURED from the code: the population, the target count, the row count, the eight, the
       RAISE guards, the live modules, and each of their restatements, one row per wording.
     * COMPARED TO A PIN, which proves the prose matches the recorded audit and NOT a fresh sweep:
-      the two coverage-decided figures in ``guard_audit.PINNED_COVERAGE``. Reaching them for real
+      the coverage-decided candidate figure in ``guard_audit.PINNED_COVERAGE``; the other figure
+      there, the tests never executing a guard line, is stated in no sentence of that docstring
+      since GQ-403. Reaching them for real
       costs a ``COVERAGE_CORE=ctrace`` run and is ``sham --check --coverage-db``'s job.
     * COMPARED TO A HAND-TYPED TABLE, which proves only that the prose matches the table: the "one"
       and the "two", against ``len(_UNOBSERVED_EITHER_WAY)`` and ``len(_NEVER_EXECUTED)``.

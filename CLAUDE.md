@@ -256,8 +256,8 @@ work.
    arithmetic maximum and could only fall, i.e. detect a claiming test that STARTS executing a guard
    line, and measured, a map recorded from one test module agreed with all six pins. Since GQ-403
    some claiming tests do execute a guard line, so a map that loses exactly those deviates, but that
-   is detection by accident; the reasoning is at the check in `scripts/guard_audit.py`. What covers map quality is the separate
-   `--min-covering-tests` floor the job passes, not the pins.
+   is detection by accident; the reasoning is at the check in `scripts/guard_audit.py`. What
+   covers map quality is the separate `--min-covering-tests` floor the job passes, not the pins.
    Run without a database it verifies the four cheap pins and NAMES the two it could not reach, on
    the clean run as well as the failing one. Two directions, because
    a mutation sweep alone answers the wrong question: it asks whether ANY test notices a guard

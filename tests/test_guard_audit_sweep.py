@@ -13,8 +13,8 @@ Everything here runs IN-PROCESS and OFFLINE, on a stand-in services tree under `
   guard, a composite condition over two lines that yields a WHOLE-CONDITION target, and a
   comprehension filter), swapped in through ``guard_audit._SERVICES`` exactly as the three tests in
   the CLI module already do. The source sits in a BYTES constant on purpose: ``_claiming_at`` parses
-  every test module, and a ``setattr(..., "...Client", ...)`` written out as code in a ``test_``
-  body would move ``PINNED_AST[DOUBLES]``;
+  every test module, and a ``setattr(..., "...Client", ...)`` written out as code anywhere in a
+  test's reach, its body, a helper it calls or a fixture, would move ``PINNED_AST[DOUBLES]``;
 * the coverage map is a REAL sqlite file written by ``coverage.CoverageData`` itself, never a
   hand-built schema, so the reader is measured against what the pinned coverage version writes;
 * ``_run_selection`` is replaced by a fake that never starts a process. It identifies WHICH mutant
@@ -196,7 +196,12 @@ def test_load_coverage_map_reads_arcs_per_test_context_from_a_real_database(
       id survives, so ``test_parametrised[case-'|']`` keeps its name (splitting on the first pipe
       truncated six real ids, see ``_node_id_of``);
     * entry and exit arcs carry NEGATIVE line numbers and are counted on their absolute line, so
-      an arc ``(-1, 9)`` covers line 9;
+      an arc ``(-1, 9)`` covers lines 1 and 9. That is the reader's own semantics and it is pinned
+      as a decision, not as coverage's: coverage marks the entry or exit of a code object starting
+      at line N with ``-N`` and does not count N as executed. For a guard line it makes no
+      difference, because a code object can only start on a guard line where the line itself is
+      reached (a lambda or a generator expression created on it); a guard line is never the first
+      line of a function entered from elsewhere (QA of GQ-403);
     * the empty default context, which coverage records for code run outside any test, is dropped;
     * the map is keyed by module NAME, whatever directory the database recorded.
     """
@@ -598,6 +603,46 @@ def test_a_timeout_in_the_mutant_run_exits_nine_and_still_restores_the_file(
 
     assert "TimeoutExpired" in reported
     assert (services / _MODULE).read_bytes() == _DEMO_SOURCE
+
+
+def _invalid_selection(_key: str, _polarity: bytes, _n: int) -> tuple[int, str]:
+    return 4, "usage error"
+
+
+def _times_out(_key: str, _polarity: bytes, _n: int) -> tuple[int, str]:
+    raise subprocess.TimeoutExpired(cmd="pytest", timeout=7)
+
+
+@pytest.mark.parametrize(
+    ("answer", "other_outcome"),
+    [(_invalid_selection, 5), (_times_out, 9)],
+    ids=["invalid-selection", "timeout"],
+)
+def test_a_foreign_write_outranks_the_abort_or_the_crash_it_coincides_with(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    answer: _Answer,
+    other_outcome: int,
+) -> None:
+    """A refused restore decides the exit whatever else ended the run.
+
+    Found by the QA of GQ-402 and measured on stand-in trees before the ordering existed: the
+    refusal fed ``refused`` only for a loop that ran to its end, so a foreign write during a run
+    that also returned an invalid selection exited 5, and one during a run that also timed out
+    exited 9, the code ``main`` reserves for a crash. Both now exit 3, name the other outcome, and
+    leave the foreign bytes where they are.
+    """
+    services, db, _recorder = _sweep_fixture(tmp_path, monkeypatch, {_MODULE: _DEMO_SOURCE})
+    runner = _FakeRunner(services, _DEMO_SOURCE, answer, foreign_on_call=1)
+    monkeypatch.setattr(guard_audit, "_run_selection", runner)
+
+    assert _sweep(db) == 3
+    reported = capsys.readouterr().err
+
+    assert f"REFUSING to restore {_MODULE}" in reported
+    assert f"(the run also ended with {other_outcome})" in reported
+    assert (services / _MODULE).read_bytes() == runner.foreign_bytes
 
 
 # --- _run_selection -------------------------------------------------------------------------------

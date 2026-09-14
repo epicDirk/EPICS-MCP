@@ -95,9 +95,10 @@ class Target:
 # ``test_check_notices_a_services_side_that_shrank``,
 # ``test_check_refuses_an_empty_services_side_rather_than_agreeing`` and
 # ``test_sweep_refuses_an_empty_services_side_before_it_opens_the_map`` monkeypatch ``_SERVICES``.
-# Since GQ-403 the tests in tests/test_guard_audit_population.py swap ``_TESTS`` the same way, and
-# tests/test_guard_audit_sweep.py swaps ``_SERVICES``; each writes its stand-in tree completely
-# before the first call reads it, because a tree changed after that call is a stale key.
+# Since GQ-402 the tests in tests/test_guard_audit_sweep.py swap ``_SERVICES`` too, and since
+# GQ-403 those in tests/test_guard_audit_population.py swap ``_TESTS`` the same way; each writes
+# its stand-in tree completely before the first call reads it, because a tree changed after that
+# call is a stale key.
 # A zero-argument cache
 # is filled by the first real call, so the stand-in is never read and the tool answers about the
 # PREVIOUS tree while reporting on the new one.
@@ -111,8 +112,8 @@ class Target:
 # touches them, and no reading of this file makes that predictable. That is the argument for the
 # key, not the exit code.
 #
-# ``cache_clear()`` is not the remedy either. There is no single place to put it (three separate
-# tests swap the constant) and a forgotten call fails GREEN. Keying on the directory READ AT CALL
+# ``cache_clear()`` is not the remedy either. There is no single place to put it (several tests
+# swap the constants) and a forgotten call fails GREEN. Keying on the directory READ AT CALL
 # TIME needs no discipline: the monkeypatch changes the key, so the stand-in tree is recomputed and
 # the refusal still fires with its own true diagnosis. The public functions stay zero-argument, so
 # no caller changes.
@@ -431,7 +432,10 @@ PINNED_AST: dict[str, int] = {
 }
 # 102 -> 261 and 21 -> 85 with GQ-403, from a COVERAGE_CORE=ctrace map recorded 2026-09-14 over the
 # suite in CI's shape (the eight engine-coupled modules not collected; 257 test functions execute a
-# guard line). The two figures no longer equal their AST twins: 25 claiming tests execute a guard
+# guard line). The map was recorded at 48eacfe under Python 3.14, before the test modules GQ-402 and
+# GQ-403 added; those drive guard_audit.py, never a client module, so they add no execution to
+# it. CI records its own map under 3.12, and its sham-audit job is the measurement that counts.
+# The two figures no longer equal their AST twins: 25 claiming tests execute a guard
 # line, all of them TestServiceUpdate tests under _install_fake in test_olog_update.py: the service
 # path calls the module-level attachment_round_trip in olog_client.py, three of whose guard lines
 # it executes, before it reaches the doubled class.
@@ -648,8 +652,14 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     requesting ``loopback_write_env``, which installs none); a ``setattr`` whose target is an
     f-string (three in ``test_doctor.py``, whose tests are counted anyway through that module's
     autouse fixture); a helper passed as a VALUE instead of being called
-    (``pytest.param(_served_404, ...)``); and a ``_boom`` handed to a helper through a parameter,
-    which ``_is_boom_double`` reads as the parameter's name, not as what the caller passed.
+    (``pytest.param(_served_404, ...)``); a ``_boom`` handed to a helper through a parameter,
+    which ``_is_boom_double`` reads as the parameter's name, not as what the caller passed. Added
+    by the QA of GQ-403, none of them present in the tree on 2026-09-14: a test class nested in
+    another and a test method inherited from a base class are not collected here; a
+    ``parametrize`` set on the class or through ``pytestmark`` does not hide the fixture of that
+    name; ``getfixturevalue`` with a name that is not a literal is not read; and a helper called
+    inside a nested function of the test counts as reached even if that function never runs, an
+    overcount rather than a blind spot.
 
     The population is deliberately NOT written down as a figure. It is a count of the current tree
     that nothing re-runs, and the previous wording carried the very error this audit exists to
@@ -776,7 +786,10 @@ def _callees(function: _AnyFunction, home: _Scope) -> Iterator[tuple[_AnyFunctio
     if module is None:
         return
     local = _locally_bound(function)
-    for node in ast.walk(function):
+    # The BODY only. A decorator argument or a default value is evaluated once, when the module is
+    # imported, not when the test runs, so ``@pytest.mark.parametrize(..., _cases())`` does not put
+    # the test under whatever ``_cases`` installs (QA of GQ-403).
+    for node in (inner for statement in function.body for inner in ast.walk(statement)):
         if not isinstance(node, ast.Call):
             continue
         callee = node.func
@@ -795,18 +808,72 @@ def _callees(function: _AnyFunction, home: _Scope) -> Iterator[tuple[_AnyFunctio
                 yield method, home
 
 
+def _parametrized_names(function: _AnyFunction) -> set[str]:
+    """The argument names a ``parametrize`` mark directly on *function* supplies.
+
+    pytest hands such an argument the parameter value, not a fixture of the same name. A mark set
+    on the class or through ``pytestmark`` is not read here; see the blind spots in
+    ``claiming_tests``.
+    """
+    names: set[str] = set()
+    for decorator in function.decorator_list:
+        if not (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "parametrize"
+        ):
+            continue
+        keyword = next((k.value for k in decorator.keywords if k.arg == "argnames"), None)
+        argnames = decorator.args[0] if decorator.args else keyword
+        text = _string_constant(argnames)
+        if text is not None:
+            names.update(part.strip() for part in text.split(",") if part.strip())
+        elif isinstance(argnames, ast.List | ast.Tuple):
+            names.update(item for item in map(_string_constant, argnames.elts) if item)
+    return names
+
+
 def _requested(function: _AnyFunction) -> list[str]:
-    """The fixture names a test or a fixture asks for: its parameters, minus ``self``.
+    """The fixture names a test or a fixture asks for, read the way pytest reads them.
+
+    pytest's ``getfuncargnames`` takes the positional-or-keyword and keyword-only parameters that
+    have NO default, and never a positional-only one; ``self`` and ``cls`` are the instance and the
+    class. A name a direct ``parametrize`` mark supplies is a value, not a fixture. A call
+    ``request.getfixturevalue("<name>")`` with a literal name is a request made at run time, and is
+    added (QA of GQ-403, each case with a stand-in test).
 
     Only ever applied to tests and fixtures. A plain helper's parameters are values its caller
-    passes, and measured on this tree eleven live helpers take a parameter named like a fixture.
+    passes, and measured on 2026-09-14 eleven live helpers take a parameter named like a fixture.
     """
     arguments = function.args
-    names = [arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)]
-    return [name for name in names if name not in ("self", "cls")]
+    positional = [*arguments.posonlyargs, *arguments.args]
+    first_defaulted = len(positional) - len(arguments.defaults)
+    names = [
+        arg.arg
+        for index, arg in enumerate(positional)
+        if index >= len(arguments.posonlyargs) and index < first_defaulted
+    ]
+    names += [
+        arg.arg
+        for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+        if default is None
+    ]
+    supplied = _parametrized_names(function)
+    requested = [name for name in names if name not in ("self", "cls") and name not in supplied]
+    for node in ast.walk(function):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "getfixturevalue"
+            and node.args
+        ):
+            literal = _string_constant(node.args[0])
+            if literal is not None and literal not in requested:
+                requested.append(literal)
+    return requested
 
 
-def _fixture_in_reach(name: str, test_home: _Scope) -> tuple[_AnyFunction, _Scope] | None:
+def _fixture_in_reach(name: str, test_home: _Scope | None) -> tuple[_AnyFunction, _Scope] | None:
     """Resolve a requested fixture the way pytest does for a test: class, module, conftest."""
     scope: _Scope | None = test_home
     while scope is not None:
@@ -830,15 +897,22 @@ class _ReachWalker:
     bodies once per test: measured on this tree on 2026-09-14, one scan took 6.3 s, where the
     body-only scan before GQ-403 had been measured at 1.79 s.
 
-    Everything is keyed on ``id()`` of AST nodes, which is sound only while their trees are alive.
-    That is why there is one walker per module, created and dropped inside the scan, and never a
-    module-level cache: a collected tree frees its ids for the next one.
+    Everything is keyed on ``id()``, which is sound only while the object is alive. AST nodes live
+    as long as their module's tree, which is why there is one walker per module, created and dropped
+    inside the scan, and never a module-level cache: a collected tree frees its ids for the next
+    one. A test's SCOPE is the other half of one key, and a class scope is built per class and
+    dropped once its tests are walked, so the walker holds every scope it keys on. Found by the QA
+    of GQ-403, measured on stand-in trees before this existed: with three classes, a module autouse
+    fixture requesting a fixture that only the third class defines, CPython handed the third class
+    the freed address of the first and the walker answered with the first class's result, in five
+    runs out of five.
     """
 
     def __init__(self) -> None:
         self._callees: dict[int, tuple[tuple[_AnyFunction, _Scope], ...]] = {}
         self._real: dict[int, bool] = {}
         self._reaches: dict[tuple[int, int], bool] = {}
+        self._keyed_scopes: dict[int, _Scope] = {}
 
     def callees(
         self, function: _AnyFunction, home: _Scope
@@ -860,10 +934,15 @@ class _ReachWalker:
         """Follow calls, and a fixture's own requests, from *start* until a real double turns up.
 
         Visited functions are remembered within one walk, because recursion is ordinary here:
-        measured on this tree, ten test helpers call themselves. A walk from a plain helper never
+        measured on 2026-09-14, ten test helpers call themselves. A walk from a plain helper never
         consults the test's scopes, so its answer is shared by every test; a walk from a fixture
         resolves further fixtures from the TEST's scopes and is remembered per test scope.
+
+        A fixture that requests its OWN name receives the fixture it overrides, one scope further
+        out, which is how pytest resolves ``def client(client)``.
         """
+        if start_is_fixture:
+            self._keyed_scopes[id(test_home)] = test_home
         key = (id(start), id(test_home) if start_is_fixture else 0)
         if key in self._reaches:
             return self._reaches[key]
@@ -882,6 +961,8 @@ class _ReachWalker:
             if is_fixture:
                 for name in _requested(function):
                     resolved = _fixture_in_reach(name, test_home)
+                    if resolved is not None and resolved[0] is function:
+                        resolved = _fixture_in_reach(name, home.parent)
                     if resolved is not None:
                         pending.append((*resolved, True))
         self._reaches[key] = found
@@ -897,12 +978,17 @@ class _ReachWalker:
             resolved = _fixture_in_reach(name, home)
             if resolved is not None:
                 starts.append((f"fixture {name}", *resolved, True))
+        # Autouse is collected by NAME, and each name runs its NEAREST definition, the way pytest
+        # does: a module fixture named like an autouse fixture of conftest.py replaces it.
+        autouse_names: list[str] = []
         scope: _Scope | None = home
         while scope is not None:
-            starts.extend(
-                (f"autouse {name}", scope.fixtures[name], scope, True) for name in scope.autouse
-            )
+            autouse_names.extend(name for name in scope.autouse if name not in autouse_names)
             scope = scope.parent
+        for name in autouse_names:
+            resolved = _fixture_in_reach(name, home)
+            if resolved is not None:
+                starts.append((f"autouse {name}", *resolved, True))
         routes = {"body"} if self.installs_a_real_double(test) else set()
         for label, function, function_home, is_fixture in starts:
             if label not in routes and self.reaches_a_real_double(
@@ -915,18 +1001,29 @@ class _ReachWalker:
 def _tests_in(
     module_body: list[ast.stmt], module: _Scope
 ) -> Iterator[tuple[str, _AnyFunction, _Scope]]:
-    """``(test id, test, home scope)`` for what pytest collects: ``test_*`` functions at module
-    level and ``test_*`` methods of ``Test*`` classes (pyproject sets neither ``python_functions``
-    nor ``python_classes``, so pytest's defaults are the rule)."""
-    for statement in module_body:
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-            if statement.name.startswith("test_") and _fixture_registration(statement) is None:
-                yield statement.name, statement, module
-        elif isinstance(statement, ast.ClassDef) and statement.name.startswith("Test"):
-            owner = _scope_of(statement.body, "class", module)
-            for method in owner.functions.values():
-                if method.name.startswith("test_"):
-                    yield f"{statement.name}::{method.name}", method, owner
+    """``(test id, test, home scope)`` for what pytest collects with its defaults.
+
+    pyproject sets neither ``python_functions`` nor ``python_classes``, so the rule is pytest's:
+    functions and methods whose name starts with ``test``, in classes whose name starts with
+    ``Test`` and that define no ``__init__``. A name defined twice is the LAST definition, because
+    that is the one the module or the class keeps. Nested test classes and test methods inherited
+    from a base class are not followed; see the blind spots in ``claiming_tests``.
+    """
+    for name, function in module.functions.items():
+        if name.startswith("test"):
+            yield name, function, module
+    classes = {
+        statement.name: statement
+        for statement in module_body
+        if isinstance(statement, ast.ClassDef) and statement.name.startswith("Test")
+    }
+    for class_name, statement in classes.items():
+        owner = _scope_of(statement.body, "class", module)
+        if "__init__" in owner.functions:
+            continue
+        for name, method in owner.functions.items():
+            if name.startswith("test"):
+                yield f"{class_name}::{name}", method, owner
 
 
 @functools.cache
@@ -1307,7 +1404,9 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     )
 
     results: list[tuple[Target, str, str]] = []
-    try:
+
+    def mutate_every_target() -> int | None:
+        """Both polarities of every covered target; the abort code, or ``None`` when all ran."""
         for target in enumerate_targets():
             tests = sorted(covering.get((target.module, target.lineno), set()))
             if not tests:
@@ -1339,19 +1438,38 @@ def cmd_sweep(args: argparse.Namespace) -> int:
                 if verdict == "INVALID-SELECTION":
                     sys.stderr.write(f"invalid selection for {target.key}. Aborting.\n")
                     return 5
+        return None
+
+    # A refused restore OUTRANKS every other outcome, the abort codes 4 and 5 and a crash included.
+    # It used to decide the exit only when the loop ran to its end, so a foreign write that
+    # coincided with an invalid selection exited 5, and one that coincided with a timeout exited 9,
+    # the code ``main`` reserves for "the tool crashed, retry": exactly the confusion the choice of
+    # 9 exists to prevent (QA of GQ-402, measured on stand-in trees before this ordering existed).
+    try:
+        aborted = mutate_every_target()
+    except Exception:
+        restore_all()
+        if not refused:
+            raise
+        traceback.print_exc()
+        aborted = 9
     finally:
         restore_all()
 
-    for target, applied, verdict in results:
-        sys.stderr.write(f"{target.key:44s} {target.form:16s} {applied:5s} {verdict}\n")
+    if aborted is None:
+        for target, applied, verdict in results:
+            sys.stderr.write(f"{target.key:44s} {target.form:16s} {applied:5s} {verdict}\n")
     if refused:
         # 3, the code the drift abort already uses: whoever reads it must look at the working
-        # tree now. The table above still stands, because its verdicts were reached on the sweep's
+        # tree now. A table above still stands, because its verdicts were reached on the sweep's
         # own mutants; what it cannot vouch for is the state it left behind.
         names = ", ".join(sorted(path.name for path in refused))
-        sys.stderr.write(f"FOREIGN WRITE: restore refused for {names}; inspect them. Exit 3.\n")
+        also = "" if aborted in (None, 3) else f" (the run also ended with {aborted})"
+        sys.stderr.write(
+            f"FOREIGN WRITE: restore refused for {names}; inspect them{also}. Exit 3.\n"
+        )
         return 3
-    return 0
+    return 0 if aborted is None else aborted
 
 
 def main(argv: list[str]) -> int:
@@ -1387,8 +1505,8 @@ def main(argv: list[str]) -> int:
         type=int,
         default=None,
         help="refuse (exit 2) a --coverage-db whose map covers fewer than N test functions. The "
-        "pins cannot detect a small map, see the note at the check itself; an unattended caller "
-        "should pass this, a developer auditing one module should not",
+        "pins cannot be trusted to detect a small map, see the note at the check itself; an "
+        "unattended caller should pass this, a developer auditing one module should not",
     )
     sham_parser.set_defaults(func=cmd_sham)
 

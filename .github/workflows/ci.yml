@@ -149,7 +149,7 @@ jobs:
   # Like `test`, this job syncs WITHOUT `--group displays`, so the eight engine-coupled test modules
   # of tests/conftest.py never run here (docs/known-limits.md, entry 16). That is deliberate and it
   # is also what the recorded pins were checked against: measured locally in the same shape on
-  # 2026-08-20, the run reproduces all six.
+  # 2026-08-20, and again on 2026-09-14 when GQ-403 re-recorded them, the run reproduces all six.
   sham-audit:
     runs-on: ubuntu-latest
     steps:
@@ -168,8 +168,11 @@ jobs:
       #     tree, both maps in this job's shape: 246 test functions execute a client-edge guard
       #     line under ctrace, 75 under the default core. ⚠️ The audit DID exit 1 on the second,
       #     and that was luck rather than the mechanism: the two cores attribute differently, so
-      #     the poorer map happened to show one execution the good one did not. A map that merely
-      #     sees LESS cannot move the pins at all, which is why --min-covering-tests exists below.
+      #     the poorer map happened to show one execution the good one did not. Until GQ-403 a
+      #     map that merely saw LESS could not move the pins at all; since then one that loses the
+      #     few claiming tests that execute a guard line does, by accident rather than as a floor
+      #     (reasoning at the check in scripts/guard_audit.py), which is why --min-covering-tests
+      #     exists below.
       #     On THIS runner it is belt and braces rather than load-bearing: coverage 7.14.1 sets
       #     SYSMON_DEFAULT = CPYTHON and PYVERSION >= (3, 14), so 3.12 records a C-tracer map
       #     either way. It is set because the interpreter above is a choice that can change, and
@@ -206,7 +209,8 @@ jobs:
       # scripts/guard_audit.py. Measured on this tree before GQ-403: a map
       # recorded from one test module covers 30 test functions and printed "checked 6 pin(s): all
       # agree", exit 0. The floor is what turns a worthless map into a refusal; the pins cannot.
-      # 200 against a measured 246, which leaves room for the suite to shrink a little and none for
+      # 200 against a measured 246 (2026-08-20; 257 on 2026-09-14), which leaves room for the suite
+      # to shrink a little and none for
       # a map recorded wrongly (75 without ctrace on 3.14, 30 from a single module). Raise it as the
       # suite grows; the reasoning is at the check itself in scripts/guard_audit.py.
       - name: The sham audit's coverage-dependent pins and its candidate list
