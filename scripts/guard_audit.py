@@ -95,6 +95,9 @@ class Target:
 # ``test_check_notices_a_services_side_that_shrank``,
 # ``test_check_refuses_an_empty_services_side_rather_than_agreeing`` and
 # ``test_sweep_refuses_an_empty_services_side_before_it_opens_the_map`` monkeypatch ``_SERVICES``.
+# Since GQ-403 the tests in tests/test_guard_audit_population.py swap ``_TESTS`` the same way, and
+# tests/test_guard_audit_sweep.py swaps ``_SERVICES``; each writes its stand-in tree completely
+# before the first call reads it, because a tree changed after that call is a stale key.
 # A zero-argument cache
 # is filled by the first real call, so the stand-in is never read and the tool answers about the
 # PREVIOUS tree while reporting on the new one.
@@ -115,7 +118,8 @@ class Target:
 # no caller changes.
 #
 # Why at all: ``claiming_tests`` re-globs and re-``ast.parse``s the whole tests/ tree on every call,
-# measured 1.79 s, and one run of tests/test_guard_audit_cli.py drives it more than twenty times
+# measured 1.79 s before GQ-403 and 2.56 s after it (2026-09-14, the reach walk added), and one run
+# of tests/test_guard_audit_cli.py drives it more than twenty times
 # (25 on 2026-08-20; the exact figure moves with every test added to that module, so re-derive it
 # by wrapping ``_claiming_at`` with a counter rather than trusting this one).
 # The cached helpers return IMMUTABLE containers and the wrappers rebuild a fresh mutable one, so a
@@ -245,17 +249,24 @@ def _node_id_of(context: str) -> str:
 
 
 def test_identity(node_id: str) -> tuple[str, str]:
-    """``(test file name, function name)``: the pair a claiming test is keyed by.
+    """``(test file name, test id)``: the pair a claiming test is keyed by.
 
-    A node id is ``<path>::[<class>::]<function>[<param case>]``, and BOTH tails matter. Comparing
-    with ``endswith("::" + name)`` ignored the file and could never match a parametrised id;
-    measured on a real ctrace map, that credited ``test_olog_write.py::test_unknown_level_refused``
-    (a candidate carrying payload vocabulary) with the guard-line execution of a SAME-NAMED test
-    in another file, and so hid it from the sham-candidate list this audit exists to produce.
+    A node id is ``<path>::[<class>::]<function>[<param case>]``, and every part but the parameter
+    case matters. Comparing with ``endswith("::" + name)`` ignored the file and could never match a
+    parametrised id; measured on a real ctrace map, that credited
+    ``test_olog_write.py::test_unknown_level_refused`` (a candidate carrying payload vocabulary)
+    with the guard-line execution of a SAME-NAMED test in another file, and so hid it from the
+    sham-candidate list this audit exists to produce.
+
+    The CLASS is kept for the same reason, one level down (GQ-403): ``test_olog_update.py`` carries
+    ``test_refuses_unroundtrippable_attachments`` in two classes, one against the real client and
+    one under a helper-installed double, and dropping the class merged them. The test id is
+    therefore ``Class::function`` inside a class and ``function`` outside one, exactly as
+    ``claiming_tests`` records it. The parameter case is cut at its FIRST bracket, because a bracket
+    cannot occur in a class or function name while ``::`` can occur inside a case id.
     """
     path, _sep, rest = node_id.partition("::")
-    function = rest.rpartition("::")[2] if "::" in rest else rest
-    return Path(path).name, function.split("[")[0]
+    return Path(path).name, rest.split("[", 1)[0]
 
 
 def load_coverage_map(db_path: Path) -> dict[tuple[str, int], set[str]]:
@@ -387,7 +398,7 @@ _EDGE_CLAIM = re.compile(
 # services-side figures below and neither sentence moved with them. Measured 2026-08-29,
 # ``sham --check`` prints "checked 4 pin(s)". The two dicts are NAMED here instead of counted, so
 # the next addition moves nothing in this comment.
-DOUBLES = "tests installing a client class double in their own body"
+DOUBLES = "tests under which a client class double is installed (body, helper, fixture, autouse)"
 EDGE_VOCABULARY = "of those, carrying payload vocabulary"
 NOT_EXECUTING = "of those, never executing a client-edge line"
 SHAM_CANDIDATES = "and claiming something about the ANSWERED payload"
@@ -401,8 +412,15 @@ CLIENT_MODULES = "client modules whose edges this audit covers"
 GUARD_TARGETS = "mutable guard sites the audit can address in them"
 
 PINNED_AST: dict[str, int] = {
-    DOUBLES: 102,
-    EDGE_VOCABULARY: 21,
+    # 102 -> 286 with GQ-403: the population follows helpers, fixtures and autouse fixtures now, not
+    # the test body alone (184 tests more: 151 in test_doctor.py through its autouse fixture, 29 in
+    # test_olog_update.py through _install_fake, 4 in test_diagnose.py through
+    # _patch_naming_client; none lost). Measured 2026-09-14 with sham --check at EPICS-MCP bde5ea7
+    # plus the GQ-403 change. Re-recorded because the CRITERION widened, not because the code under
+    # audit changed.
+    DOUBLES: 286,
+    # 21 -> 91 with GQ-403, the same widening: 70 of the 184 carry payload vocabulary.
+    EDGE_VOCABULARY: 91,
     CLIENT_MODULES: 6,
     # 96 -> 98 with GQ-290: the bare-[] branch in ArchiverClient.get_pv_history is one new
     # isinstance call plus one new whole condition. Re-recorded because the SHAPE grew, not
@@ -411,7 +429,14 @@ PINNED_AST: dict[str, int] = {
     # branch), so it adds nothing to the unobserved tables.
     GUARD_TARGETS: 98,
 }
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 102, SHAM_CANDIDATES: 21}
+# 102 -> 261 and 21 -> 85 with GQ-403, from a COVERAGE_CORE=ctrace map recorded 2026-09-14 over the
+# suite in CI's shape (the eight engine-coupled modules not collected; 257 test functions execute a
+# guard line). The two figures no longer equal their AST twins: 25 claiming tests execute a guard
+# line, all of them TestServiceUpdate tests under _install_fake in test_olog_update.py: the service
+# path calls the module-level attachment_round_trip in olog_client.py, three of whose guard lines
+# it executes, before it reaches the doubled class.
+# Six of those 25 carry payload vocabulary, hence 91 - 6 = 85.
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 261, SHAM_CANDIDATES: 85}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
@@ -428,6 +453,19 @@ PINNED_CANDIDATES: tuple[str, ...] = (
     "test_checkers.py::test_query_naming_lookup_404_is_definitive_not_registered",
     "test_checkers.py::test_query_naming_lookup_obsolete_preserves_status",
     "test_checkers.py::test_query_olog_response_error_is_not_a_connection_error",
+    # GQ-403, read 2026-09-14. How: each test read in full by one read-only reader and re-read by
+    # an adversarial one set to refute the reading (Opus, twenty-four agents over twelve batches),
+    # no reading refuted, three re-read by hand; the per-test readings are in the workspace evidence
+    # folder analysis/gq402-gq403-guard-audit-2026-09-14/. None asserts what a doubled client edge
+    # does with an answered payload.
+    # These three run under ``_patch_naming_client``. Two claim the classification in diagnose
+    # and checkers (unregistered, withheld on a transport failure) with a well-formed or a raising
+    # double; in the third the double sits behind the url gate and is never constructed, which
+    # is what that test asserts. The vocabulary is the word 'answer' in their docstrings, about
+    # a query result or a mutant, not about a service response.
+    "test_diagnose.py::test_shell_naming_enabled_splits_unregistered",
+    "test_diagnose.py::test_shell_naming_gate_empty_url_withholds_no_client",
+    "test_diagnose.py::test_shell_naming_unreachable_is_withheld_not_false_typo",
     # BG-DTHR, read 2026-08-19 and judged NOT a sham guard, recorded here because the instruction
     # this list carries is "added names are what has not been read". Its ``_OkClient`` double is
     # the legitimate use this module's own docstring names, keeping a service-layer test off the
@@ -438,15 +476,95 @@ PINNED_CANDIDATES: tuple[str, ...] = (
     # rendered verdict.
     "test_doctor.py::test_a_throttled_run_is_never_reported_as_confirmed",
     "test_doctor.py::test_unverified_plane_does_not_fail_but_is_reported",
+    # GQ-403, read 2026-09-14. How: each test read in full by one read-only reader and re-read by
+    # an adversarial one set to refute the reading (Opus, twenty-four agents over twelve batches),
+    # no reading refuted, three re-read by hand; the per-test readings are in the workspace evidence
+    # folder analysis/gq402-gq403-guard-audit-2026-09-14/. None asserts what a doubled client edge
+    # does with an answered payload.
+    # The sixty below are in the population only through the module's autouse fixture, which
+    # replaces doctor.OlogClient for every test. For fifty-six that double is not on the path the
+    # test drives at all (failure classification, identity probes, live posture, the write-gate
+    # block, CLI arguments); four drive a run_doctor render the double keeps off the network.
+    # Their vocabulary ('refus', 'unreadable', 'answer') describes doctor-level logic.
+    "test_doctor.py::test_a_credential_in_the_olog_url_never_reaches_the_report",
+    "test_doctor.py::test_a_denied_sub_probe_is_never_reported_as_a_confirmed_run",
+    "test_doctor.py::test_a_denied_target_does_not_read_as_the_string_the_gate_compared",
+    "test_doctor.py::test_a_null_device_audit_sink_is_refused_rather_than_called_writable",
+    "test_doctor.py::test_a_pattern_outside_the_declared_spellings_is_not_called_narrow",
+    "test_doctor.py::test_a_pattern_that_does_not_compile_is_named_rather_than_shown_as_an_allowlist",
+    "test_doctor.py::test_a_permitted_target_can_be_one_the_block_cannot_name",
+    "test_doctor.py::test_a_refusal_that_belongs_to_no_plane_is_named_beside_one_that_does",
+    "test_doctor.py::test_a_run_that_hard_failed_still_says_part_of_it_was_not_measured",
+    "test_doctor.py::test_a_run_that_was_denied_nothing_keeps_its_clean_verdict",
+    "test_doctor.py::test_a_set_search_port_changes_the_posture_line",
+    "test_doctor.py::test_a_throttled_identity_beacon_is_throttled_not_a_failed_probe",
+    "test_doctor.py::test_a_throttled_plane_alone_does_not_get_a_second_refusal_clause",
+    "test_doctor.py::test_a_verdict_keeps_a_cause_that_carries_no_credential",
+    "test_doctor.py::test_alarm_failed_probe_is_identity_probe_failed",
+    "test_doctor.py::test_alarm_missing_elastic_status_falls_back_to_ok",
+    "test_doctor.py::test_alarm_unreadable_2xx_body_stays_unverified",
+    "test_doctor.py::test_an_entry_the_client_refuses_is_reported_as_dropped",
+    "test_doctor.py::test_an_entry_without_a_host_is_named_and_not_resolved",
+    "test_doctor.py::test_an_unreachable_verdict_renders_the_message_the_probe_handed_it",
+    "test_doctor.py::test_an_unreadable_ca_bundle_is_a_ca_error_on_both_arrival_shapes",
+    "test_doctor.py::test_archiver_asks_the_metrics_route_and_refuses_redirects",
+    "test_doctor.py::test_archiver_identity_requires_the_identity_field",
+    "test_doctor.py::test_archiver_unmeasurable_ingest_stays_ok_but_leaves_a_trace",
+    "test_doctor.py::test_audit_sink_that_does_not_exist_yet_is_undecided",
+    "test_doctor.py::test_audit_sink_that_is_a_directory_is_refused",
+    "test_doctor.py::test_classify_a_throttled_probe_is_throttled_not_unreachable",
+    "test_doctor.py::test_classify_retry_error_is_api_error",
+    "test_doctor.py::test_cli_bad_arg_exits_two",
+    "test_doctor.py::test_cli_nonpositive_timeout_is_usage_error",
+    "test_doctor.py::test_cli_verdict_with_nothing_configured_claims_no_identity",
+    "test_doctor.py::test_every_problem_status_names_a_remedy",
+    "test_doctor.py::test_every_rest_plane_is_actually_identity_probed",
+    "test_doctor.py::test_identity_failed_probe_is_identity_probe_failed",
+    "test_doctor.py::test_identity_of_a_different_known_service_is_unverified_with_the_name",
+    "test_doctor.py::test_identity_unreadable_2xx_body_stays_unverified",
+    "test_doctor.py::test_identity_unreadable_2xx_raw_valueerror_stays_unverified",
+    "test_doctor.py::test_live_posture_rejects_off_spellings_pvxs_does_not_parse",
+    "test_doctor.py::test_naming_identifies_via_its_swagger_contract",
+    "test_doctor.py::test_no_configured_value_can_forge_a_line_anywhere_in_the_report",
+    "test_doctor.py::test_no_plane_verdict_echoes_a_credential_its_exception_still_carries",
+    "test_doctor.py::test_reads_denied_counts_only_this_runs_own_refusals",
+    "test_doctor.py::test_retrieval_url_without_archiver_url_is_a_config_error",
+    "test_doctor.py::test_run_doctor_closes_verification_complete_on_a_denied_sub_probe",
+    "test_doctor.py::test_the_api_error_remedy_does_not_send_the_retrieval_plane_to_mgmt",
+    "test_doctor.py::test_the_audit_probe_raises_nothing_on_an_unusable_path",
+    "test_doctor.py::test_the_block_is_built_without_constructing_either_gate",
+    "test_doctor.py::test_the_fallback_finding_names_the_variable_that_would_help",
+    "test_doctor.py::test_the_fallback_note_stays_out_where_it_would_mislead",
+    "test_doctor.py::test_the_installation_block_renders_where_the_reader_sees_it",
+    "test_doctor.py::test_the_olog_target_rebuild_keeps_the_address_and_drops_a_plain_credential",
+    "test_doctor.py::test_the_port_variable_goes_through_the_clients_arithmetic_too",
+    "test_doctor.py::test_the_probe_refuses_a_non_regular_file_without_opening_it",
+    "test_doctor.py::test_the_probe_reports_an_unusable_path_from_the_first_guard",
+    "test_doctor.py::test_the_render_says_an_empty_pattern_refuses_the_start",
+    "test_doctor.py::test_the_render_shows_where_an_armed_gate_can_write",
+    "test_doctor.py::test_the_reported_logbooks_are_the_set_the_real_olog_gate_enforces",
+    "test_doctor.py::test_the_reported_reach_violations_decide_whether_the_real_gate_can_be_built",
+    "test_doctor.py::test_the_throttle_arm_outranks_every_predicate_that_reads_a_cause",
+    "test_doctor.py::test_throttled_is_inconclusive_by_decision_and_a_subset_of_it",
     "test_olog.py::test_empty_page_past_the_end_is_not_annotated",
     "test_olog.py::test_list_log_levels_splits_outage_from_bad_answer",
     "test_olog.py::test_note_on_a_mixed_or_list_does_not_generalise",
     "test_olog.py::test_search_bad_time_is_not_a_connection_error",
     "test_olog.py::test_unreadable_levels_lookup_says_so_and_keeps_the_result",
-    "test_olog_write.py::test_bad_level_does_not_burn_a_rate_token",
-    "test_olog_write.py::test_blank_level_refused",
-    "test_olog_write.py::test_reply_tool_threads_and_bad_id_is_400",
-    "test_olog_write.py::test_unknown_level_refused",
+    # GQ-403, read 2026-09-14. How: each test read in full by one read-only reader and re-read by
+    # an adversarial one set to refute the reading (Opus, twenty-four agents over twelve batches),
+    # no reading refuted, three re-read by hand; the per-test readings are in the workspace evidence
+    # folder analysis/gq402-gq403-guard-audit-2026-09-14/. None asserts what a doubled client edge
+    # does with an answered payload.
+    # Refused by the service's own input check before any client call; the test asserts that the
+    # capture double recorded no call at all.
+    "test_olog_update.py::TestServiceUpdate::test_empty_title_refused",
+    # The same four tests as before GQ-403, now CLASS-qualified because the identity keeps the
+    # class (see ``test_identity``); read before and not re-judged.
+    "test_olog_write.py::TestCreateLevelVocabulary::test_bad_level_does_not_burn_a_rate_token",
+    "test_olog_write.py::TestCreateLevelVocabulary::test_blank_level_refused",
+    "test_olog_write.py::TestCreateLevelVocabulary::test_unknown_level_refused",
+    "test_olog_write.py::TestToolOrchestration::test_reply_tool_threads_and_bad_id_is_400",
     "test_write_gate_contract.py::test_round_trip_write_is_gate_denied_before_any_read",
 )
 
@@ -477,28 +595,61 @@ UNPINNED_VERDICT = "no sham guard found BY THIS FILTER: a judgement about a list
 
 
 def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
-    """``{test file: [(test name, edge-claim)]}`` for tests that install a client CLASS double.
+    """``{test file: [(test id, edge-claim)]}`` for tests that run under a client CLASS double.
 
-    The primary signal is mechanical and per-FUNCTION: the test's own body replaces a client
-    class, so the real client edge is out of the path for that test. A per-file signal was tried
-    first and is useless: it marks every test in a file that doubles a client anywhere, which
-    swept in schema and CLI tests that never touch a client.
+    The primary signal is mechanical and per TEST: a ``setattr`` that replaces a client class is
+    installed for that test, so the real client edge is out of its path. What counts as installed
+    follows what pytest and Python actually do (GQ-403), and the routes are:
 
-    The second element flags payload vocabulary (``unreadable``, ``malformed``, ``_raises`` ...).
-    That distinguishes "claims something about what the service ANSWERED" (the sham-guard
-    candidates) from a double used merely to keep a service-layer test off the network, which is
-    a legitimate use of the same tool. It is a filter for reading order, not a verdict.
+    * the test's own body;
+    * a module function the test, or anything it reaches, calls by bare name, and a method of the
+      test's own class called through ``self.``, transitively;
+    * a fixture the test or one of its fixtures requests by PARAMETER, resolved in the test's
+      class, then its module, then ``conftest.py`` of the same directory;
+    * every autouse fixture of ``conftest.py``, of the module, and of the test's own class.
 
-    ``_boom`` doubles are excluded by construction: their point is that nothing runs (they assert
-    no client is ever built), so they are negative controls rather than sham guards.
+    Until GQ-403 only the body counted, and this docstring named the blind spot: three helpers and
+    one autouse fixture installed doubles nothing saw (``_install_fake`` in ``test_olog_update.py``,
+    ``_patch_naming_client`` in ``test_diagnose.py``, ``_wire_starved_archiver`` and the autouse
+    ``_identity_never_touches_the_network`` in ``test_doctor.py``). ``claiming_routes`` names the
+    route per test, because for most of the doctor module the autouse fixture is the only one, and
+    a reader of the candidate list cannot see that from a test's own text.
 
-    Known blind spot, stated rather than implied: a double installed OUTSIDE the test body is not
-    seen here. That covers a pytest fixture and, measured on this tree, a plain module-level helper
-    and ``tests/test_olog_update.py``, which installs one in ``_install_fake`` that nearly every
-    test in the module calls. Until the criterion was read from the syntax tree, three of them were
-    counted, by accident: the regex matched their METHOD patch onto the double. Consistently blind
-    beats arbitrarily half-sighted; widening the signal to helper-installed doubles is its own
-    piece of work.
+    A per-FILE signal was tried first and rejected, and following an autouse fixture does not bring
+    it back. That signal marked every test in a file that doubled a client ANYWHERE, a heuristic
+    that swept in schema and CLI tests which never ran under one; an autouse fixture installs its
+    double for every test in its scope as a fact of the run. The price is stated rather than
+    hidden: one autouse fixture puts a whole module into the population.
+
+    The test id is ``Class::function`` for a test in a class and ``function`` otherwise, and the
+    class is not decoration. ``test_olog_update.py`` defines
+    ``test_refuses_unroundtrippable_attachments`` twice, once against the real client and once
+    under ``_install_fake``. Keyed by function name alone the two are ONE identity, so whatever the
+    coverage map records for either is credited to both, and a test that executes no guard line
+    leaves the candidate list on its twin's execution. Measured on 2026-09-14 both twins happen to
+    execute the same three guard lines, so no figure moved here; the stand-in test in
+    tests/test_guard_audit_population.py pins the case where only one does. ``test_identity`` keeps
+    the class for the same reason.
+
+    The second element flags payload vocabulary (``unreadable``, ``malformed``, ``_raises`` ...),
+    read from the TEST's own name and docstring, never from a helper or fixture it reaches. That
+    distinguishes "claims something about what the service ANSWERED" (the sham-guard candidates)
+    from a double used merely to keep a service-layer test off the network, which is a legitimate
+    use of the same tool. It is a filter for reading order, not a verdict.
+
+    ``_boom`` doubles are negative controls rather than sham guards (they assert that no client is
+    ever built), so a test stays out only when EVERY double in its reach is one. A ``_boom`` in the
+    body does not exclude a test that an autouse fixture puts under a real double.
+
+    Known blind spots, measured on this tree on 2026-09-14 and stated rather than implied:
+    ``unittest.mock.patch`` and ``patch.object`` (one client double in the tree, in
+    ``test_checkers.py``, and it is a ``_Boom``); a helper imported from ANOTHER module
+    (``tests/wire_tools.py`` installs none); the ``usefixtures`` marker (four modules, all
+    requesting ``loopback_write_env``, which installs none); a ``setattr`` whose target is an
+    f-string (three in ``test_doctor.py``, whose tests are counted anyway through that module's
+    autouse fixture); a helper passed as a VALUE instead of being called
+    (``pytest.param(_served_404, ...)``); and a ``_boom`` handed to a helper through a parameter,
+    which ``_is_boom_double`` reads as the parameter's name, not as what the caller passed.
 
     The population is deliberately NOT written down as a figure. It is a count of the current tree
     that nothing re-runs, and the previous wording carried the very error this audit exists to
@@ -509,32 +660,306 @@ def claiming_tests() -> dict[str, list[tuple[str, bool]]]:
     carry. What must never come from prose is whether a double was INSTALLED: see
     ``class_double_calls``.
     """
-    return {file: list(entries) for file, entries in _claiming_at(_TESTS)}
+    return {
+        file: [(test_id, edge) for test_id, edge, _routes in entries]
+        for file, entries in _claiming_at(_TESTS)
+    }
+
+
+def claiming_routes() -> dict[tuple[str, str], tuple[str, ...]]:
+    """``{(test file, test id): routes}``: how each claiming test came to run under its double.
+
+    A route is ``body``, ``helper <name>``, ``fixture <name>`` or ``autouse <name>``, named by the
+    FIRST hop from the test: a helper that calls another helper is reported under the first one.
+    """
+    return {
+        (file, test_id): routes
+        for file, entries in _claiming_at(_TESTS)
+        for test_id, _edge, routes in entries
+    }
+
+
+_AnyFunction = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+@dataclass(frozen=True)
+class _Scope:
+    """One namespace a test can reach into: ``conftest.py``, its module, or its class.
+
+    ``functions`` holds what a CALL at that level resolves to (module functions for a module and
+    for ``conftest.py``, methods for a class), ``fixtures`` what a parameter resolves to, by the
+    name pytest registers. ``parent`` is the next level out, ``None`` above ``conftest.py``.
+    """
+
+    kind: str  # conftest | module | class
+    functions: dict[str, _AnyFunction]
+    fixtures: dict[str, _AnyFunction]
+    autouse: tuple[str, ...]
+    parent: _Scope | None
+
+
+def _fixture_registration(function: _AnyFunction) -> tuple[str, bool] | None:
+    """``(name pytest registers, autouse)`` when *function* is a fixture, else ``None``."""
+    for decorator in function.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        named_fixture = (isinstance(target, ast.Attribute) and target.attr == "fixture") or (
+            isinstance(target, ast.Name) and target.id == "fixture"
+        )
+        if not named_fixture:
+            continue
+        name, autouse = function.name, False
+        if isinstance(decorator, ast.Call):
+            for keyword in decorator.keywords:
+                if keyword.arg == "autouse" and isinstance(keyword.value, ast.Constant):
+                    autouse = keyword.value.value is True
+                elif keyword.arg == "name":
+                    name = _string_constant(keyword.value) or name
+        return name, autouse
+    return None
+
+
+def _scope_of(body: list[ast.stmt], kind: str, parent: _Scope | None) -> _Scope:
+    """The functions and fixtures defined directly in *body*, never in a nested block."""
+    functions: dict[str, _AnyFunction] = {}
+    fixtures: dict[str, _AnyFunction] = {}
+    autouse: list[str] = []
+    for statement in body:
+        if not isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        registration = _fixture_registration(statement)
+        if registration is None:
+            functions[statement.name] = statement
+            continue
+        name, is_autouse = registration
+        fixtures[name] = statement
+        if is_autouse:
+            autouse.append(name)
+    return _Scope(kind, functions, fixtures, tuple(autouse), parent)
+
+
+def _locally_bound(function: _AnyFunction) -> frozenset[str]:
+    """The names *function* binds itself, each of which shadows a module function of that name.
+
+    Measured case: a test in ``test_doctor.py`` defines its own ``_served_404`` beside the
+    module-level helper of the same name, and a call inside it means the local one. The bodies of
+    nested functions, lambdas and classes are not entered; only their names bind here.
+    """
+    arguments = function.args
+    bound = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    bound.update(arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
+    pending: list[ast.AST] = list(function.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(node.name)
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add((node.asname or node.name).split(".")[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        pending.extend(ast.iter_child_nodes(node))
+    return frozenset(bound)
+
+
+def _callees(function: _AnyFunction, home: _Scope) -> Iterator[tuple[_AnyFunction, _Scope]]:
+    """The functions *function* calls that this scan resolves, each with the scope it lives in.
+
+    A bare name resolves to a function of the enclosing MODULE, because Python looks a name up in
+    the globals and never in the class from inside a method, unless *function* binds that name
+    itself. ``self.<name>`` resolves to a method of the enclosing class.
+    """
+    module = home.parent if home.kind == "class" else home
+    if module is None:
+        return
+    local = _locally_bound(function)
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        if isinstance(callee, ast.Name) and callee.id not in local:
+            target = module.functions.get(callee.id)
+            if target is not None:
+                yield target, module
+        elif (
+            home.kind == "class"
+            and isinstance(callee, ast.Attribute)
+            and isinstance(callee.value, ast.Name)
+            and callee.value.id == "self"
+        ):
+            method = home.functions.get(callee.attr)
+            if method is not None:
+                yield method, home
+
+
+def _requested(function: _AnyFunction) -> list[str]:
+    """The fixture names a test or a fixture asks for: its parameters, minus ``self``.
+
+    Only ever applied to tests and fixtures. A plain helper's parameters are values its caller
+    passes, and measured on this tree eleven live helpers take a parameter named like a fixture.
+    """
+    arguments = function.args
+    names = [arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)]
+    return [name for name in names if name not in ("self", "cls")]
+
+
+def _fixture_in_reach(name: str, test_home: _Scope) -> tuple[_AnyFunction, _Scope] | None:
+    """Resolve a requested fixture the way pytest does for a test: class, module, conftest."""
+    scope: _Scope | None = test_home
+    while scope is not None:
+        fixture = scope.fixtures.get(name)
+        if fixture is not None:
+            return fixture, scope
+        scope = scope.parent
+    return None
+
+
+def _installs_a_real_double(function: _AnyFunction) -> bool:
+    """*function*'s own text installs at least one client class double that is not a ``_boom``."""
+    return any(not _is_boom_double(call) for call in class_double_calls(function))
+
+
+class _ReachWalker:
+    """Follows the reach of the tests of ONE module, remembering what it has already walked.
+
+    The memory is not an optimisation for its own sake. The tests of a module call the same
+    helpers and share the same autouse fixtures, so walking each reach afresh re-walked those
+    bodies once per test: measured on this tree on 2026-09-14, one scan took 6.3 s, where the
+    body-only scan before GQ-403 had been measured at 1.79 s.
+
+    Everything is keyed on ``id()`` of AST nodes, which is sound only while their trees are alive.
+    That is why there is one walker per module, created and dropped inside the scan, and never a
+    module-level cache: a collected tree frees its ids for the next one.
+    """
+
+    def __init__(self) -> None:
+        self._callees: dict[int, tuple[tuple[_AnyFunction, _Scope], ...]] = {}
+        self._real: dict[int, bool] = {}
+        self._reaches: dict[tuple[int, int], bool] = {}
+
+    def callees(
+        self, function: _AnyFunction, home: _Scope
+    ) -> tuple[tuple[_AnyFunction, _Scope], ...]:
+        key = id(function)
+        if key not in self._callees:
+            self._callees[key] = tuple(_callees(function, home))
+        return self._callees[key]
+
+    def installs_a_real_double(self, function: _AnyFunction) -> bool:
+        key = id(function)
+        if key not in self._real:
+            self._real[key] = _installs_a_real_double(function)
+        return self._real[key]
+
+    def reaches_a_real_double(
+        self, start: _AnyFunction, start_home: _Scope, start_is_fixture: bool, test_home: _Scope
+    ) -> bool:
+        """Follow calls, and a fixture's own requests, from *start* until a real double turns up.
+
+        Visited functions are remembered within one walk, because recursion is ordinary here:
+        measured on this tree, ten test helpers call themselves. A walk from a plain helper never
+        consults the test's scopes, so its answer is shared by every test; a walk from a fixture
+        resolves further fixtures from the TEST's scopes and is remembered per test scope.
+        """
+        key = (id(start), id(test_home) if start_is_fixture else 0)
+        if key in self._reaches:
+            return self._reaches[key]
+        pending: list[tuple[_AnyFunction, _Scope, bool]] = [(start, start_home, start_is_fixture)]
+        seen: set[int] = set()
+        found = False
+        while pending and not found:
+            function, home, is_fixture = pending.pop()
+            if id(function) in seen:
+                continue
+            seen.add(id(function))
+            if self.installs_a_real_double(function):
+                found = True
+                break
+            pending.extend((callee, where, False) for callee, where in self.callees(function, home))
+            if is_fixture:
+                for name in _requested(function):
+                    resolved = _fixture_in_reach(name, test_home)
+                    if resolved is not None:
+                        pending.append((*resolved, True))
+        self._reaches[key] = found
+        return found
+
+    def routes(self, test: _AnyFunction, home: _Scope) -> tuple[str, ...]:
+        """The routes by which *test* runs under a real client class double, sorted, or empty."""
+        starts: list[tuple[str, _AnyFunction, _Scope, bool]] = []
+        for callee, callee_home in self.callees(test, home):
+            prefix = "self." if callee_home is home and home.kind == "class" else ""
+            starts.append((f"helper {prefix}{callee.name}", callee, callee_home, False))
+        for name in _requested(test):
+            resolved = _fixture_in_reach(name, home)
+            if resolved is not None:
+                starts.append((f"fixture {name}", *resolved, True))
+        scope: _Scope | None = home
+        while scope is not None:
+            starts.extend(
+                (f"autouse {name}", scope.fixtures[name], scope, True) for name in scope.autouse
+            )
+            scope = scope.parent
+        routes = {"body"} if self.installs_a_real_double(test) else set()
+        for label, function, function_home, is_fixture in starts:
+            if label not in routes and self.reaches_a_real_double(
+                function, function_home, is_fixture, home
+            ):
+                routes.add(label)
+        return tuple(sorted(routes))
+
+
+def _tests_in(
+    module_body: list[ast.stmt], module: _Scope
+) -> Iterator[tuple[str, _AnyFunction, _Scope]]:
+    """``(test id, test, home scope)`` for what pytest collects: ``test_*`` functions at module
+    level and ``test_*`` methods of ``Test*`` classes (pyproject sets neither ``python_functions``
+    nor ``python_classes``, so pytest's defaults are the rule)."""
+    for statement in module_body:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            if statement.name.startswith("test_") and _fixture_registration(statement) is None:
+                yield statement.name, statement, module
+        elif isinstance(statement, ast.ClassDef) and statement.name.startswith("Test"):
+            owner = _scope_of(statement.body, "class", module)
+            for method in owner.functions.values():
+                if method.name.startswith("test_"):
+                    yield f"{statement.name}::{method.name}", method, owner
 
 
 @functools.cache
-def _claiming_at(root: Path) -> tuple[tuple[str, tuple[tuple[str, bool], ...]], ...]:
-    """``claiming_tests`` for one test directory. Keyed, see the note above the caches.
+def _claiming_at(
+    root: Path,
+) -> tuple[tuple[str, tuple[tuple[str, bool, tuple[str, ...]], ...]], ...]:
+    """``claiming_tests`` plus routes, for one test directory. Keyed, see the note above the caches.
 
-    This is the expensive one: it re-``ast.parse``s every tracked test module, measured 1.79 s over
-    98 files, and the CLI test module drives it more than twenty times in a single run, 25 when
-    last counted. That figure moves with the module, so the point is the ORDER, not the number.
+    This is the expensive one: it re-``ast.parse``s every test module and ``conftest.py`` and
+    follows every test's reach, and the CLI test modules drive it many times per run. How long one
+    call takes moves with the tree, so the point is the ORDER, not a number.
     """
-    found: dict[str, list[tuple[str, bool]]] = {}
+    conftest_path = root / "conftest.py"
+    conftest = (
+        _scope_of(ast.parse(conftest_path.read_bytes()).body, "conftest", None)
+        if conftest_path.is_file()
+        else None
+    )
+    found: dict[str, list[tuple[str, bool, tuple[str, ...]]]] = {}
     # pytest's own default is ``test_*.py *_test.py``, and pyproject sets no ``python_files``. A
     # narrower glob here would let a contributor add doubles under a name pytest RUNS and the
     # audited population does not see. Latent today: no such file exists, so this closes a hole
     # rather than fixing a wrong figure.
     for path in sorted(set(root.glob("test_*.py")) | set(root.glob("*_test.py"))):
-        for node in ast.walk(ast.parse(path.read_bytes())):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        body = ast.parse(path.read_bytes()).body
+        module = _scope_of(body, "module", conftest)
+        walker = _ReachWalker()
+        for test_id, test, home in _tests_in(body, module):
+            routes = walker.routes(test, home)
+            if not routes:
                 continue
-            if not node.name.startswith("test_"):
-                continue
-            if not [call for call in class_double_calls(node) if not _is_boom_double(call)]:
-                continue
-            claim = bool(_EDGE_CLAIM.search(node.name + (ast.get_docstring(node) or "")))
-            found.setdefault(path.name, []).append((node.name, claim))
+            claim = bool(_EDGE_CLAIM.search(test.name + (ast.get_docstring(test) or "")))
+            found.setdefault(path.name, []).append((test_id, claim, routes))
     return tuple((file, tuple(entries)) for file, entries in found.items())
 
 
@@ -649,15 +1074,21 @@ def cmd_sham(args: argparse.Namespace) -> int:
         # --coverage-db path, so the CHEAP recipe's first instruction demanded the expensive
         # artifact: the inversion the whole cost split exists to prevent.
         claiming = claiming_tests()
+        # The ROUTE is printed beside each name because the test's own text often does not show
+        # the double at all: for most of test_doctor.py an autouse fixture is the only route, and a
+        # reader judging a candidate needs to know what took the client off its path (GQ-403).
+        routes = claiming_routes()
         sys.stderr.write(
-            f"{measured[DOUBLES]} tests install a client class double in their own body; "
+            f"{measured[DOUBLES]} tests run under a client class double (in their body, or through "
+            "a helper, a fixture or an autouse fixture); "
             f"{measured[EDGE_VOCABULARY]} of them carry payload vocabulary and are the list the "
-            "verdict was reached by READING:\n"
+            "verdict was reached by READING, each with its route:\n"
         )
         for filename, entries in sorted(claiming.items()):
             for name, is_edge_claim in entries:
                 if is_edge_claim:
-                    sys.stderr.write(f"  {filename}::{name}\n")
+                    route = ", ".join(routes[(filename, name)])
+                    sys.stderr.write(f"  {filename}::{name}  [{route}]\n")
         return 0
     if args.coverage_db is None:
         return _compare(measured)
@@ -693,13 +1124,17 @@ def cmd_sham(args: argparse.Namespace) -> int:
     # Found by an adversarial pass after the CI job was already green, and it is the exact trap this
     # audit exists to name, one level up.
     #
-    # ``PINNED_COVERAGE[NOT_EXECUTING]`` equals ``PINNED_AST[DOUBLES]`` and
-    # ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equals ``PINNED_AST[EDGE_VOCABULARY]``: today NO claiming
-    # test executes a guard line, so both coverage figures sit at their arithmetic MAXIMUM.
+    # Until GQ-403 ``PINNED_COVERAGE[NOT_EXECUTING]`` equalled ``PINNED_AST[DOUBLES]`` and
+    # ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equalled ``PINNED_AST[EDGE_VOCABULARY]``: no claiming
+    # test executed a guard line, so both coverage figures sat at their arithmetic MAXIMUM.
     # ``measured[NOT_EXECUTING]`` is ``|claiming \\ executing|``, bounded above by ``|claiming|``,
-    # so a map seeing FEWER executions cannot push it any higher and the comparison stays green. The
-    # pins can only fall, i.e. they detect a claiming test that STARTS executing a guard line, which
-    # is the sham signal and is worth having; they are structurally blind to a bad map.
+    # so a map seeing FEWER executions could not push it any higher and the comparison stayed green.
+    # Since GQ-403 the population follows helpers and fixtures, and some of its tests DO execute a
+    # guard line (the figures and their source are at ``PINNED_COVERAGE``), so a map that loses
+    # exactly those executions now deviates. That is detection by accident, not a floor: by the same
+    # arithmetic, not measured, a map recorded from the one module that carries them keeps them all
+    # and agrees again. What the pins can be trusted with is unchanged: a claiming test that STARTS
+    # executing a guard line, which is the sham signal and is worth having.
     #
     # Measured 2026-08-20, all three in the CI shape: a full ctrace run covers 246 test functions; a
     # map recorded from ONE module (tests/test_olog.py) covers 30 and still printed
@@ -714,8 +1149,8 @@ def cmd_sham(args: argparse.Namespace) -> int:
     if args.min_covering_tests is not None and len(executing) < args.min_covering_tests:
         sys.stderr.write(
             f"MAP TOO SMALL: {len(executing)} covering test functions, floor is "
-            f"{args.min_covering_tests}. The pins CANNOT see this: they sit at their maximum, so a "
-            "map that measured almost nothing still agrees with them. Re-record over the WHOLE "
+            f"{args.min_covering_tests}. The pins cannot be trusted with this: a map that "
+            "measured almost nothing can still agree with them. Re-record over the WHOLE "
             f"suite with per-test contexts.\n{RERUN_COVERAGE}\n"
         )
         return 2
@@ -750,7 +1185,7 @@ def cmd_sham(args: argparse.Namespace) -> int:
             sys.stderr.write(f"{RERUN_AST}\n")
         return _compare(measured) or (1 if appeared or vanished else 0)
     sys.stderr.write(
-        f"tests installing a client CLASS double in their own body: {measured[DOUBLES]}\n"
+        f"tests under a client CLASS double (body, helper, fixture, autouse): {measured[DOUBLES]}\n"
         f"  of those, never executing a client-edge line: {measured[NOT_EXECUTING]}\n"
         f"  and claiming something about the ANSWERED payload: {measured[SHAM_CANDIDATES]}\n\n"
     )

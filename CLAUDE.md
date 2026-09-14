@@ -252,9 +252,11 @@ work.
    EXECUTED a guard line live in `guard_audit.PINNED_COVERAGE`, and **since GB-34 the `sham-audit`
    job of `.github/workflows/ci.yml` checks them on every push**, so all six are verified rather
    than four. It stays out of the local gate because it costs a full ctrace suite run.
-   ⚠️ **Those two pins sit at their arithmetic maximum and are therefore blind to a bad map**: they
-   can only fall, i.e. detect a claiming test that STARTS executing a guard line. Measured, a map
-   recorded from one test module agreed with all six pins. What covers map quality is the separate
+   ⚠️ **Those two pins cannot be trusted to see a bad map.** Until GQ-403 they sat at their
+   arithmetic maximum and could only fall, i.e. detect a claiming test that STARTS executing a guard
+   line, and measured, a map recorded from one test module agreed with all six pins. Since GQ-403
+   some claiming tests do execute a guard line, so a map that loses exactly those deviates, but that
+   is detection by accident; the reasoning is at the check in `scripts/guard_audit.py`. What covers map quality is the separate
    `--min-covering-tests` floor the job passes, not the pins.
    Run without a database it verifies the four cheap pins and NAMES the two it could not reach, on
    the clean run as well as the failing one. Two directions, because

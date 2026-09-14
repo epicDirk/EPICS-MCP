@@ -13,30 +13,36 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 102 tests
-  install a client class double in their own body and NOT ONE of them executes a client-edge guard
-  line, which is what a class-level double is FOR: it takes the real client off the path. That is
-  the double used legitimately, to keep a service-layer test off the network. ⚠️ The 102nd arrived
-  with GQ-153 on 2026-08-23, AFTER that sweep, and was held against the same criterion by hand
-  rather than by the sweep: it replaces the whole ``ChannelFinderClient`` class so a coverage
-  audit can be joined against a known registry offline, and reaches no client-edge line. Every
-  further one is in the same position until the sweep is re-run, which is what the guard below
-  exists to keep visible. 21 of those also
-  carry payload vocabulary, and every one of them was read: they claim SERVICE-layer behaviour (an
-  already-constructed exception must not be relabelled "unreachable"; an unknown level is refused
-  before any request is built; a plane refused by this command's own read throttle is reported as
-  unmeasured rather than as unreachable), not a client-edge check. ⚠️ The vocabulary filter
-  itself decides who gets read, a first, narrower filter surfaced only 2 and a review showed it
+* Sham guards (direction B): **none found, which is not the same as none there.** 286 tests
+  install a client class double, in their own body or, since GQ-403 on 2026-09-14, through a
+  helper, a fixture or an autouse fixture; until then only the body counted. A class-level double
+  takes the real client off the path, which is what it is FOR: the double used legitimately, to
+  keep a service-layer test off the network. A few of those tests still execute a client-edge guard
+  line through module-level code of the doubled client's module; ``guard_audit.PINNED_COVERAGE``
+  records the figures that follow from it. ⚠️ Two groups arrived AFTER the 2026-07-25 sweep and
+  were held against the criterion by reading and by the coverage map rather than by the sweep: the
+  GQ-153 test of 2026-08-23, which replaces the whole ``ChannelFinderClient`` class so a coverage
+  audit can be joined against a known registry offline, and every test the GQ-403 widening added.
+  They stay in that position until the sweep is re-run, which is what the guard below exists to
+  keep visible. 91 of those also carry payload vocabulary, and every one that executes no guard
+  line was read (the first set on 2026-07-25, the GQ-403 additions on 2026-09-14): they claim
+  SERVICE-layer or doctor-level behaviour (an already-constructed exception must not be relabelled
+  "unreachable"; an unknown level is refused before any request is built; a plane refused by this
+  command's own read throttle is reported as unmeasured rather than as unreachable; a doctor
+  identity probe that met an unreadable body stays unverified), not a client-edge check.
+  ⚠️ The vocabulary filter itself decides who gets read, a first, narrower filter surfaced only 2
+  and a review showed it
   missed a test whose docstring states the edge claim in words the regex did not know. Treat this
   as "no sham guard found by this filter", and widen the filter before treating it as a stronger
   statement.
 
-  S33, and the distinction matters for what can be checked cheaply: 21 of those carry payload
-  vocabulary before any coverage map is consulted, and 21 remain once the tests that DO execute a
+  S33, and the distinction matters for what can be checked cheaply: 91 of those carry payload
+  vocabulary before any coverage map is consulted, and 85 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
   coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
-  ⚠️ Every figure in this bullet moved on 2026-07-26, and the uniformity above is the RESULT of
+  ⚠️ Every figure in this bullet moved on 2026-07-26, and the uniformity it then showed, the same
+  figure before and after the map, was the RESULT of
   three separate measurement defects being removed, not a change in the code under audit: the
   population read the function's SOURCE TEXT (a docstring quoting the idiom counted, and so did a
   method patch on a helper-installed double), and the coverage matcher compared node ids with

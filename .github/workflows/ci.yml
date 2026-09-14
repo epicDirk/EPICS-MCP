@@ -201,8 +201,9 @@ jobs:
       # in this log; keeping the flag here is the part only a reader of this file can do.
       #
       # ⛔ --min-covering-tests IS NOT OPTIONAL FOR AN UNATTENDED CALLER, and the first version of
-      # this job did not have it. The two pinned coverage figures sit at their arithmetic maximum,
-      # so a map that measured almost nothing still AGREES with them. Measured on this tree: a map
+      # this job did not have it. A map that measured almost nothing can still AGREE with the two
+      # pinned coverage figures; why GQ-403 did not change that is at the check itself in
+      # scripts/guard_audit.py. Measured on this tree before GQ-403: a map
       # recorded from one test module covers 30 test functions and printed "checked 6 pin(s): all
       # agree", exit 0. The floor is what turns a worthless map into a refusal; the pins cannot.
       # 200 against a measured 246, which leaves room for the suite to shrink a little and none for

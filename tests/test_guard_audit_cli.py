@@ -158,6 +158,32 @@ def test_check_with_a_database_compares_the_coverage_pins_too(
         )
 
 
+def _pins_agree_with_a_map_that_no_claiming_test_executes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[str, ...]:
+    """Move the coverage pins and the candidate list to what a map without executions yields.
+
+    Such a map leaves every claiming test "never executing", so the two coverage figures equal
+    their AST twins and the candidate list is the whole vocabulary list. The recorded pins say less
+    since GQ-403 (25 claiming tests execute a guard line on the real map, measured 2026-09-14), so a
+    test whose subject is not those values sets them here instead of depending on a real map.
+    Returns the candidate list it installed.
+    """
+    counted = guard_audit.population()
+    monkeypatch.setitem(guard_audit.PINNED, guard_audit.NOT_EXECUTING, counted[guard_audit.DOUBLES])
+    monkeypatch.setitem(
+        guard_audit.PINNED, guard_audit.SHAM_CANDIDATES, counted[guard_audit.EDGE_VOCABULARY]
+    )
+    listed = tuple(
+        f"{file}::{test_id}"
+        for file, entries in sorted(guard_audit.claiming_tests().items())
+        for test_id, edge in entries
+        if edge
+    )
+    monkeypatch.setattr(guard_audit, "PINNED_CANDIDATES", listed)
+    return listed
+
+
 def test_a_run_with_a_map_says_it_checked_all_six_pins(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,9 +208,14 @@ def test_a_run_with_a_map_says_it_checked_all_six_pins(
     recognisable to whoever reads the log.
 
     The map is non-empty (an empty one is exit 2, see the blind-map test above) but names a test
-    that is NOT in the claiming population, so no claiming test executes a guard line: both
-    coverage figures then equal their AST twins, which is what the recorded pins say, so the run
-    agrees and exits 0.
+    that is NOT in the claiming population, so no claiming test executes a guard line and both
+    coverage figures equal their AST twins. Until GQ-403 that was also what the recorded pins said.
+    Since then it is not: the population follows helpers and fixtures, and 25 of its tests execute
+    a guard line on the real map (measured 2026-09-14), so the recorded coverage figures sit below
+    their twins and no synthetic map can reproduce them without that real map. The coverage pins
+    and the candidate list are therefore moved to what THIS map yields; the subject here is the
+    count in the verdict line, and the values are exercised by the tests above that manufacture a
+    deviation.
 
     Red proof: drop ``--cov-context=test`` from the CI recipe and the job's map carries no per-test
     contexts, which is the real-world form of this; in-process, delete the coverage branch of
@@ -196,6 +227,7 @@ def test_a_run_with_a_map_says_it_checked_all_six_pins(
         "load_coverage_map",
         lambda _path: {("olog_client.py", 181): {outside_the_population}},
     )
+    _pins_agree_with_a_map_that_no_claiming_test_executes(monkeypatch)
 
     assert guard_audit.main([*_ARGV, "--coverage-db", "synthetic"]) == 0
     reported = capsys.readouterr().err
@@ -209,12 +241,14 @@ def test_a_map_that_measured_almost_nothing_is_refused_rather_than_agreed_with(
 ) -> None:
     """The floor the PINS cannot provide, and the reason it had to be built (GB-34).
 
-    ``PINNED_COVERAGE[NOT_EXECUTING]`` equals ``PINNED_AST[DOUBLES]`` and
-    ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equals ``PINNED_AST[EDGE_VOCABULARY]``, i.e. no claiming
-    test executes a guard line today, so both coverage figures sit at their arithmetic MAXIMUM.
-    ``|claiming \\ executing|`` cannot exceed ``|claiming|``, so a map that sees FEWER executions
-    leaves them exactly where they are and ``--check`` agrees. The empty-map refusal above does not
-    help either: a nearly worthless map is not an empty one.
+    Until GQ-403 ``PINNED_COVERAGE[NOT_EXECUTING]`` equalled ``PINNED_AST[DOUBLES]`` and
+    ``PINNED_COVERAGE[SHAM_CANDIDATES]`` equalled ``PINNED_AST[EDGE_VOCABULARY]``, i.e. no claiming
+    test executed a guard line, so both coverage figures sat at their arithmetic MAXIMUM.
+    ``|claiming \\ executing|`` cannot exceed ``|claiming|``, so a map that saw FEWER executions
+    left them exactly where they were and ``--check`` agreed. Since GQ-403 some claiming tests do
+    execute a guard line and a map that loses exactly those deviates, but only by accident: see the
+    note at the check in ``scripts/guard_audit.py``. The empty-map refusal above does not help
+    either: a nearly worthless map is not an empty one.
 
     Measured before this refusal existed, all in the CI shape: the full ctrace run covers 246 test
     functions; a map recorded from ONE module covers 30 and still printed "checked 6 pin(s): all
@@ -340,11 +374,12 @@ def test_the_candidate_list_is_pinned_by_its_members_not_only_its_length(
     and the exit code says so, swapping one member for another keeps every figure identical and
     must still stop the run.
     """
-    swapped_out = guard_audit.PINNED_CANDIDATES[-1]
-    replaced = (*guard_audit.PINNED_CANDIDATES[:-1], "test_zz.py::test_never_read_by_anyone")
+    listed = _pins_agree_with_a_map_that_no_claiming_test_executes(monkeypatch)
+    swapped_out = listed[-1]
+    replaced = (*listed[:-1], "test_zz.py::test_never_read_by_anyone")
     monkeypatch.setattr(guard_audit, "PINNED_CANDIDATES", replaced)
     # An empty covering set: no claiming test executes a guard line, so sham_edge is the whole
-    # real candidate list and the COUNTS are unchanged. Only the membership differs.
+    # vocabulary list and the COUNTS agree with the pins set above. Only the membership differs.
     monkeypatch.setattr(
         guard_audit, "load_coverage_map", lambda _path: {("olog_client.py", 181): set()}
     )

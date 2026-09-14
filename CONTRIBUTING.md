@@ -203,8 +203,9 @@ you a green run. Why CI itself cannot execute them, and where their coverage com
     Rewording a sentence means updating its pattern, not its figure. A new claim must also declare
     what it READS (`_Claim.reads`, keyword-only and required); that declaration is traced, so it
     has to be true rather than plausible.
-  - *A new test that installs a client class double in its own body* moves the audited population
-    and reddens
+  - *A new test that runs under a client class double*, installed in its own body or through a
+    helper, a fixture or an autouse fixture (the reach `guard_audit.claiming_tests` follows since
+    GQ-403), moves the audited population and reddens
     `tests/test_guard_audit_cli.py::test_check_without_a_database_agrees_and_names_what_it_could_not_reach`,
     which drives the real CLI and therefore fails on any `PINNED_AST` figure moving, and on any
     figure being measured that nothing pins. Re-measure with
