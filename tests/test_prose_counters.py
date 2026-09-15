@@ -51,7 +51,7 @@ import re
 import sys
 import textwrap
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -860,9 +860,24 @@ def _distinct_element_schemas() -> int:
     return len({json.dumps(schema, sort_keys=True) for schema in ts._OUTPUT_ARRAY_ITEMS.values()})
 
 
-@cache
-def _typed_dict_fields() -> dict[str, dict[str, str]]:
-    """Every ``TypedDict`` in the package by name, with its fields' normalized annotations.
+def _is_typed_dict_base(base: ast.expr) -> bool:
+    """``TypedDict`` itself, in either spelling, as opposed to another TypedDict being inherited."""
+    return (isinstance(base, ast.Name) and base.id == "TypedDict") or (
+        isinstance(base, ast.Attribute) and base.attr == "TypedDict"
+    )
+
+
+def _base_name(base: ast.expr) -> str:
+    """The name a base expression carries, in the two shapes a base is written in here."""
+    if isinstance(base, ast.Name):
+        return base.id
+    if isinstance(base, ast.Attribute):
+        return base.attr
+    return ""
+
+
+def _typed_dict_index(trees: Iterable[tuple[str, ast.Module]]) -> dict[str, dict[str, str]]:
+    """Every ``TypedDict`` in *trees* by name, with its fields' normalized annotations.
 
     BOTH spellings, and the functional one is not hypothetical: ``ArchiverHistoryResult`` in
     ``tools/archiver.py`` HAS to use it, because ``from`` is a Python keyword and cannot be a
@@ -873,25 +888,27 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
     otherwise stand in for a field (``warnings: list[str] = []`` already exists inside a function
     body in this package).
 
-    Base resolution is deliberately ABSENT rather than carried untested, measured, no TypedDict
-    in this package inherits from another one, so the code that walked bases would never run.
-    Inherited fields therefore stay outside every count that reads this index; that is a scope
-    statement, not an oversight, and it goes red the day it matters only if someone adds the walk
-    together with a test for it.
+    Base resolution is deliberately ABSENT, and since [GQ-400] its absence is REFUSED rather than
+    merely stated. Measured on 2026-09-16 in a throwaway copy: a second base beside ``TypedDict``
+    kept ``ChannelInfo`` in the index with its own body only, so the sentence counting its fields
+    stayed green while the type had gained one; a single inherited base dropped the class out of the
+    index altogether and reached the reader as "ChannelInfo is gone", which sends the next author
+    looking for a deletion that never happened. Neither shape exists in this package today, which is
+    why ``test_the_typed_dict_index_refuses_an_inherited_field`` holds the refusal on constructed
+    input rather than on the tree.
     """
     index: dict[str, dict[str, str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
-        for node in ast.walk(_parsed(path)):
-            if isinstance(node, ast.ClassDef) and any(
-                (isinstance(base, ast.Name) and base.id == "TypedDict")
-                or (isinstance(base, ast.Attribute) and base.attr == "TypedDict")
-                for base in node.bases
-            ):
-                index[node.name] = {
-                    item.target.id: ast.unparse(item.annotation).replace(" ", "")
-                    for item in node.body
-                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
-                }
+    classes: list[tuple[str, ast.ClassDef]] = []
+    for label, tree in tuple(trees):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                classes.append((label, node))
+                if any(_is_typed_dict_base(base) for base in node.bases):
+                    index[node.name] = {
+                        item.target.id: ast.unparse(item.annotation).replace(" ", "")
+                        for item in node.body
+                        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                    }
             elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
                 called = node.value.func
                 functional = (isinstance(called, ast.Name) and called.id == "TypedDict") or (
@@ -903,7 +920,7 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
                     continue
                 if not isinstance(fields, ast.Dict):
                     raise AssertionError(
-                        f"{path.name}: {target.id} uses the functional TypedDict form without a "
+                        f"{label}: {target.id} uses the functional TypedDict form without a "
                         "literal field mapping, so its fields cannot be read from the syntax tree"
                     )
                 index[target.id] = {
@@ -911,7 +928,28 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
                     for key, annotation in zip(fields.keys, fields.values, strict=True)
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)
                 }
+    inheriting = sorted(
+        f"{label}: {node.name}({', '.join(ast.unparse(base) for base in node.bases)})"
+        for label, node in classes
+        if (node.name in index and len(node.bases) > 1)
+        or any(_base_name(base) in index for base in node.bases)
+    )
+    if inheriting:
+        raise AssertionError(
+            "these classes inherit TypedDict fields, and this index carries no base resolution, so "
+            f"every count that reads it would miss them without a word: {inheriting}"
+        )
     return index
+
+
+@cache
+def _typed_dict_fields() -> dict[str, dict[str, str]]:
+    """The package's TypedDicts, read through this module's one file seam.
+
+    The reading itself, and what it refuses, is :func:`_typed_dict_index`; only the walk over the
+    shipped package lives here, so the index can be driven on constructed trees by a test.
+    """
+    return _typed_dict_index((path.name, _parsed(path)) for path in sorted(_SRC.rglob("*.py")))
 
 
 @cache
@@ -1093,7 +1131,14 @@ def _nullable_array_rows() -> int:
 
 @cache
 def _channel_info_fields() -> int:
-    """Fields of ``ChannelInfo``, a NAMESAKE of the find_channels key count, not the same set."""
+    """Fields of ``ChannelInfo``, a NAMESAKE of the find_channels key count, not the same set.
+
+    DECIDED WITH [GQ-400], and it is the rest an outside QA left here: a field ``ChannelInfo``
+    INHERITS was invisible to this count. :func:`_typed_dict_index` refuses both shapes of that
+    now, so the "is gone" below stays what it says, a deletion. ⚠️ "all required", the other half
+    of the sentence this count serves, names no size and stays a human reading: ``total=False`` or
+    a ``NotRequired`` field would make it false with nothing here going red.
+    """
     fields = _typed_dict_fields().get("ChannelInfo")
     if fields is None:
         raise AssertionError("ChannelInfo is gone from the package's TypedDicts")
@@ -3333,4 +3378,43 @@ def test_the_element_schema_claims_bind_only_their_own_sentence() -> None:
     assert not findings, (
         "an element-schema claim no longer binds its own sentence, and only that one:\n  "
         + "\n  ".join(findings)
+    )
+
+
+def test_the_typed_dict_index_refuses_an_inherited_field() -> None:
+    """A TypedDict that inherits fields stops the index, in both shapes, on constructed input.
+
+    The index reads class bodies and resolves no bases, which is right while nothing inherits and
+    silently wrong the moment something does. Measured on 2026-09-16 in a throwaway copy: a second
+    base beside ``TypedDict`` left the count of ``ChannelInfo``'s fields where it was while the type
+    had gained one, with the whole module green; a single inherited base dropped the class out of
+    the index and reached the reader as "ChannelInfo is gone", which describes a deletion that never
+    happened. Neither shape exists in the package, so the refusal is held here rather than there.
+
+    RED-PROOF: switch the refusal off and both shapes below are reported as unrefused.
+    """
+    base = "class _Provenance(TypedDict):\n    source_url: str\n\n\n"
+    findings: list[str] = []
+    for shape, source in (
+        (
+            "a second base beside TypedDict",
+            "class ChannelInfo(_Provenance, TypedDict):\n    name: str\n",
+        ),
+        (
+            "an inherited TypedDict as the only base",
+            "class ChannelInfo(_Provenance):\n    name: str\n",
+        ),
+    ):
+        try:
+            _typed_dict_index([("probe.py", ast.parse(base + source))])
+        except AssertionError as refusal:
+            if "ChannelInfo" not in str(refusal):
+                findings.append(f"{shape}: refused without naming the class: {refusal}")
+            continue
+        findings.append(f"{shape}: an inherited field went unrefused")
+    plain = _typed_dict_index([("probe.py", ast.parse(base))])
+    if plain != {"_Provenance": {"source_url": "str"}}:
+        findings.append(f"a TypedDict that inherits nothing is no longer read as written: {plain}")
+    assert not findings, (
+        "the TypedDict index no longer refuses what it cannot resolve:\n  " + "\n  ".join(findings)
     )
