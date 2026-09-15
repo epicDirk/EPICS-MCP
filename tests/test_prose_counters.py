@@ -1130,6 +1130,10 @@ def _paths_rows(test_name: str) -> int:
 
 _DISCOVER_CONFORMANCE = "test_discover_pvs_structured_output_conforms_to_its_schema"
 _FIND_CHANNELS_CONFORMANCE = "test_find_channels_structured_output_conforms_to_its_schema"
+#: The test whose docstring states how the array rows split between the two element schemas. Both
+#: rows of that family are keyed on it, because their phrases are otherwise plain enough to bind a
+#: neighbouring sentence about a different set (see the claims themselves).
+_ELEMENT_SCHEMA_TEST = "test_typed_output_schema_arrays_declare_their_element_schema"
 
 
 @cache
@@ -1806,17 +1810,27 @@ _CLAIMS: tuple[_Claim, ...] = (
         lambda: _rows_sharing(ts._OPAQUE_OBJECT_ITEMS),
         reads=("_OUTPUT_ARRAY_ITEMS", "_OPAQUE_OBJECT_ITEMS"),
     ),
+    # These two carried the plainest phrases in the table, "most for the N rows carrying" and "the
+    # other N rows are", with no scope, no path and no mention of the schema they count. Measured on
+    # 2026-09-16: a TRUE neighbouring sentence about a different set, written in the estate's own
+    # voice above _OUTPUT_ARRAY_ITEMS, was accused by the second one with an instruction to break
+    # it. Each is keyed on the test whose docstring states the split AND anchored on the element
+    # schema it counts, so the phrase binds what it is about rather than what it sounds like.
     _claim(
         "string-item rows",
-        r"most for the (\w+) rows carrying",
+        r'most for the (\w+) rows carrying ``\{"type": "string"\}``',
         lambda: _rows_advertising(ts._STRING_ITEMS),
         reads=("_OUTPUT_ARRAY_ITEMS", "_STRING_ITEMS"),
+        scope=_ELEMENT_SCHEMA_TEST,
+        path="tests/test_server.py",
     ),
     _claim(
         "opaque-item rows",
-        r"the other (\w+) rows are",
+        r'the other (\w+) rows are ``\{"type": "object", "additionalProperties": true\}``',
         lambda: _rows_advertising(ts._OPAQUE_OBJECT_ITEMS),
         reads=("_OUTPUT_ARRAY_ITEMS", "_OPAQUE_OBJECT_ITEMS"),
+        scope=_ELEMENT_SCHEMA_TEST,
+        path="tests/test_server.py",
     ),
     # --- family 5: the declared arrays -----------------------------------------------------------
     _claim(
@@ -3238,4 +3252,54 @@ def test_every_mapped_field_row_names_the_test_that_reads_its_map() -> None:
     assert not faults, (
         "these rows of _MAPPED_FIELD_CLAIMS do not name the test that reads their map:\n  "
         + "\n  ".join(faults)
+    )
+
+
+def test_the_element_schema_claims_bind_only_their_own_sentence() -> None:
+    """The two element-schema row claims bind the sentence they were written for, and nothing else.
+
+    Both patterns were plain phrases with no scope, no path and no mention of the schema they count,
+    so they judged every block of every watched file. Measured on 2026-09-16 in a throwaway copy: a
+    TRUE sentence in the estate's own voice above ``_OUTPUT_ARRAY_ITEMS``, "the other 5 rows are
+    ``anyOf[array, null]``", was accused as "opaque-item rows: prose says 5, the set has 9", which
+    reads as an instruction to break it.
+
+    Each claim matches exactly one block today, so the narrowing is INERT on the real tree and would
+    survive its own removal unnoticed there. That is the shape of decision this module holds on
+    constructed input, the way ``test_a_gate_scope_lead_is_taken_literally`` holds its own.
+
+    RED-PROOF: drop ``scope`` from either claim and the neighbour finding reports it; drop the
+    element schema from either pattern and the other-set finding does.
+    """
+    claims = {claim.label: claim for claim in _CLAIMS}
+    findings: list[str] = []
+    for label, sentence, other_set in (
+        (
+            "string-item rows",
+            'That matters most for the 7 rows carrying ``{"type": "string"}``: over the wire',
+            "That matters most for the 5 rows carrying ``anyOf[array, null]``",
+        ),
+        (
+            "opaque-item rows",
+            'Stated honestly, the other 9 rows are ``{"type": "object", "additionalProperties": '
+            "true}``, a deliberately opaque element",
+            "Eleven rows carry a plain element schema; the other 5 rows are "
+            "``anyOf[array, null]``.",
+        ),
+    ):
+        claim = claims[label]
+        home = ProseBlock("tests/test_server.py", 1, _ELEMENT_SCHEMA_TEST, sentence)
+        neighbour = ProseBlock("tests/test_server.py", 1, "<module>", sentence)
+        stranger = ProseBlock("server.py", 1, _ELEMENT_SCHEMA_TEST, sentence)
+        if not (claim.applies_to(home) and claim.phrase.search(home.text)):
+            findings.append(f"{label}: no longer binds the sentence it was written for")
+        if claim.applies_to(neighbour):
+            findings.append(f"{label}: binds the same sentence outside its scope")
+        if claim.applies_to(stranger):
+            findings.append(f"{label}: binds the same sentence in another file")
+        if claim.phrase.search(other_set):
+            findings.append(f"{label}: binds a sentence about a different set")
+    assert not findings, (
+        "an element-schema claim no longer binds its own sentence, and only that one:\n  "
+        + "\n  ".join(findings)
     )
