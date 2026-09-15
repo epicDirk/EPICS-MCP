@@ -64,6 +64,7 @@ from tests import prose_numbers as pn
 from tests import test_server as ts
 from tests import test_write_gate_contract as write_gate
 from tests.prose_numbers import ProseBlock, ProseSite, iter_blocks, iter_sites, parse_count
+from tests.wire_tools import wire_tools_by_name
 
 _TESTS = Path(__file__).resolve().parent
 _SRC = _TESTS.parent / "src" / "epics_mcp"
@@ -1026,6 +1027,9 @@ def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
 #: Spellings of a union that are the SAME TYPE as ``X | None`` and must therefore read alike.
 #: ``Annotated[X, ...]`` is unwrapped rather than treated as a member: the wrapper carries metadata,
 #: never a type, and it is already house style on the input side of this package.
+#: ⚠️ Hand-kept, and nothing proves it complete. What a missing spelling costs is measured where it
+#: costs something: on the rows the nullable-array count reads, against the schema they advertise
+#: ([GQ-405], ``test_the_union_reader_agrees_with_the_wire_on_every_array_row``).
 _UNION_ALIASES: frozenset[str] = frozenset({"Union", "Optional"})
 
 
@@ -1043,7 +1047,11 @@ def _union_members(annotation: str) -> frozenset[str]:
     left five of those seven spellings answering wrongly, in both directions.
 
     Anything the walk does not recognize comes back as a single unparsed member, so a non-union
-    annotation answers as a one-element set.
+    annotation answers as a one-element set. ⚠️ An unknown SPELLING of a union answers the same
+    way, silently and as NOT nullable: measured on 2026-09-16, a module-level type alias and a
+    ``NotRequired`` qualifier both did, while the schema each of them rendered to said the
+    opposite. On the array rows that reading is held against the advertised schema ([GQ-405]);
+    everywhere else it stays this walk's honest limit.
     """
 
     def members(node: ast.expr) -> Iterator[str]:
@@ -1101,32 +1109,46 @@ def _row_admits_null(annotation: str) -> bool:
     return "None" in _union_members(annotation)
 
 
+def _array_row_annotation(tool: str, field: str) -> str:
+    """The annotation an ``_OUTPUT_ARRAY_ITEMS`` row's field carries in its TOOL'S OWN result type.
+
+    One resolution for the two readers of these rows, the count below and the wire comparison in
+    ``test_the_union_reader_agrees_with_the_wire_on_every_array_row``, so the two cannot disagree
+    about which annotation a row is about.
+
+    Loud rather than lenient when a row stops resolving: a silent skip would let the count fall
+    while the prose stayed green, which is the whole failure mode this module exists for.
+    """
+    results = _tool_result_type()
+    fields = _typed_dict_fields().get(results.get(tool, ""))
+    if fields is None or field not in fields:
+        raise AssertionError(
+            f"the array row ({tool!r}, {field!r}) no longer resolves to a TypedDict field "
+            f"(the tool's return annotation reads {results.get(tool)!r}), the row, the "
+            "return annotation or the result shape moved"
+        )
+    return fields[field]
+
+
 @cache
 def _nullable_array_rows() -> int:
     """Array rows whose field is an ``X | None``, the ``anyOf[array, null]`` subset.
 
     Bound to the (tool, field) PAIR the row is keyed on, resolved through the TOOL'S OWN result
-    type. Matching by field NAME across the package read a set the sentence does not name, and the
-    collisions are real rather than imagined: ``pvs``, ``tags``, ``properties`` and ``samples``
-    each carry two different annotations here, so one internal TypedDict declaring any of them
-    nullable would have moved this count without a single array row changing.
+    type by :func:`_array_row_annotation`. Matching by field NAME across the package read a set the
+    sentence does not name, and the collisions are real rather than imagined: ``pvs``, ``tags``,
+    ``properties`` and ``samples`` each carry two different annotations here, so one internal
+    TypedDict declaring any of them nullable would have moved this count without a single array row
+    changing.
 
-    Loud rather than lenient when a row stops resolving: a silent skip would let the count fall
-    while the prose stayed green, which is the whole failure mode this module exists for.
+    ⚠️ What this reads is the ANNOTATION, so it is exactly as right as the union walk is. Since
+    [GQ-405] that reading is compared to the schema each row advertises, by
+    ``test_the_union_reader_agrees_with_the_wire_on_every_array_row``.
     """
-    index = _typed_dict_fields()
-    results = _tool_result_type()
-    found = 0
-    for tool, field in ts._OUTPUT_ARRAY_ITEMS:
-        fields = index.get(results.get(tool, ""))
-        if fields is None or field not in fields:
-            raise AssertionError(
-                f"the array row ({tool!r}, {field!r}) no longer resolves to a TypedDict field "
-                f"(the tool's return annotation reads {results.get(tool)!r}), the row, the "
-                "return annotation or the result shape moved"
-            )
-        found += _row_admits_null(fields[field])
-    return found
+    return sum(
+        _row_admits_null(_array_row_annotation(tool, field))
+        for tool, field in ts._OUTPUT_ARRAY_ITEMS
+    )
 
 
 @cache
@@ -3417,4 +3439,47 @@ def test_the_typed_dict_index_refuses_an_inherited_field() -> None:
         findings.append(f"a TypedDict that inherits nothing is no longer read as written: {plain}")
     assert not findings, (
         "the TypedDict index no longer refuses what it cannot resolve:\n  " + "\n  ".join(findings)
+    )
+
+
+async def test_the_union_reader_agrees_with_the_wire_on_every_array_row() -> None:
+    """[GQ-405]: what the union reader decides about nullability, held against what the wire says.
+
+    ``_union_members`` recognizes a closed set of spellings, ``_UNION_ALIASES`` among them, and
+    anything else comes back as one unparsed member, which reads as NOT nullable. One direction of
+    that is loud already: a nullable field the reader misreads makes a correct count go red. The
+    other is silent, and it is the one measured on 2026-09-16 in a throwaway copy: ``levels`` of
+    ``list_log_levels`` re-annotated through a module-level type alias, and again through a
+    ``NotRequired`` qualifier, rendered as ``anyOf[array, null]`` on the wire while the reader
+    answered not-nullable, the nullable-array count stayed where it was, and this module together
+    with ``tests/test_server.py`` stayed green.
+
+    So every row that count reads is read twice, once through its annotation and once through the
+    schema it advertises, and a disagreement names the row, the annotation and the schema. The
+    repair it asks for is teaching the walk the new spelling, never editing a row.
+
+    NOT a measurement in the sense of the module header: nothing here takes a LENGTH from
+    ``mcp.list_tools()``, only each row's own property, so the lane trap that header describes does
+    not apply here. Measured 2026-09-16: no row belongs to a display tool, so the core-only lane
+    reads the same rows. ⚠️ Its reach is the array rows and stops there: an unrecognized spelling
+    on any other field is compared to nothing.
+    """
+    advertised = await wire_tools_by_name()
+    disagreements: list[str] = []
+    for tool, field in ts._OUTPUT_ARRAY_ITEMS:
+        annotation = _array_row_annotation(tool, field)
+        schema = ((advertised[tool].outputSchema or {}).get("properties") or {}).get(field)
+        if not isinstance(schema, dict):
+            disagreements.append(f"{tool}.{field}: the wire advertises no property for this row")
+            continue
+        if _row_admits_null(annotation) != ts._schema_permits_null(schema):
+            reading = "nullable" if _row_admits_null(annotation) else "not nullable"
+            disagreements.append(
+                f"{tool}.{field}: the union reader reads {annotation!r} as {reading}, "
+                f"the wire advertises {schema}"
+            )
+    assert not disagreements, (
+        "the union reader and the advertised schema disagree about a declared array row, so the "
+        "nullable-array count is reading a spelling rather than a type; teach the walk the "
+        "spelling, do not edit the row:\n  " + "\n  ".join(disagreements)
     )
