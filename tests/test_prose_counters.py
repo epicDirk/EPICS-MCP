@@ -573,23 +573,115 @@ def _is_mcp_tool(node: ast.expr) -> bool:
     )
 
 
+#: The attributes through which a FastMCP server takes a tool. ``tool`` is the one this package
+#: writes; ``add_tool`` registers a ready ``Tool`` object and is listed so that a module reaching
+#: for it is REFUSED by :func:`_tool_registrations` rather than silently left uncounted.
+_REGISTRAR_ATTRIBUTES: frozenset[str] = frozenset({"tool", "add_tool"})
+
+
+@dataclass(frozen=True)
+class _Registration:
+    """One tool registration in a module: its line, and the function it names if it names one."""
+
+    lineno: int
+    function: str | None
+
+
+def _direct_registration_target(call: ast.Call) -> ast.expr | None:
+    """The function a DIRECT ``mcp.tool(...)`` registers on the spot, or ``None`` for a factory.
+
+    FastMCP's first parameter is ``name_or_fn``: a function in that slot is registered immediately,
+    while a string or ``None`` there is a NAME and the call hands back a decorator instead. Both
+    spellings of the slot count, positional and keyword, because FastMCP 3.4.4 registers both
+    (probed with a scratch server on 2026-09-16).
+    """
+    slot = call.args[0] if call.args else None
+    if slot is None:
+        slot = next((item.value for item in call.keywords if item.arg == "name_or_fn"), None)
+    if slot is None or (
+        isinstance(slot, ast.Constant) and (slot.value is None or isinstance(slot.value, str))
+    ):
+        return None
+    return slot
+
+
+def _tool_registrations(tree: ast.Module, label: str) -> tuple[_Registration, ...]:
+    """Every tool registration in *tree*, in each form FastMCP takes one, or a loud refusal.
+
+    The forms: a decorator, bare or called (``@mcp.tool``, ``@mcp.tool(...)``); the call position
+    ``mcp.tool(...)(fn)``; and the direct call ``mcp.tool(fn, ...)``, see
+    :func:`_direct_registration_target`. One reading serves :func:`_registered_tools` and
+    :func:`_registered_tool_functions`, so the count and the functions behind it cannot disagree
+    about which forms exist.
+
+    REFUSED rather than skipped: every other reach for a registrar attribute in *tree*, whatever
+    object it hangs off. That covers an alias (``registrar = mcp``), a registrar kept in a variable
+    (``register = mcp.tool``), a factory applied somewhere else, and ``add_tool``. Skipping was the
+    defect: each of those can register a tool that no lane count sees. ⚠️ What a syntax tree cannot
+    name stays out of reach, ``getattr(mcp, "tool")`` above all; and this reads ONE module, so a
+    registrar reached from another module is the job of
+    ``test_no_other_module_reaches_the_registrar``.
+    """
+    registrations: list[_Registration] = []
+    accounted: set[int] = set()
+    applied: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            for decorator in node.decorator_list:
+                if _is_mcp_tool(decorator):
+                    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                    accounted.add(id(target))
+                    applied.add(id(decorator))
+                    registrations.append(_Registration(decorator.lineno, node.name))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Call)
+            and _is_mcp_tool(node.func)
+        ):
+            # ``mcp.tool(...)(fn)``: requiring the OUTER call's func to be a call is what keeps a
+            # decorator, which ``ast.walk`` also visits on its own, from being counted twice.
+            accounted.add(id(node.func.func))
+            applied.add(id(node.func))
+            argument = node.args[0] if node.args else None
+            named = argument.id if isinstance(argument, ast.Name) else None
+            registrations.append(_Registration(node.lineno, named))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and id(node) not in applied and _is_mcp_tool(node):
+            function = _direct_registration_target(node)
+            if function is not None:
+                accounted.add(id(node.func))
+                named = function.id if isinstance(function, ast.Name) else None
+                registrations.append(_Registration(node.lineno, named))
+    unreadable = sorted(
+        f"{label}:{node.lineno}: {ast.unparse(node)}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr in _REGISTRAR_ATTRIBUTES
+        and id(node) not in accounted
+    )
+    if unreadable:
+        raise AssertionError(
+            "a tool registrar is reached in a form this reader does not count, so a tool "
+            f"registered that way would leave every lane claim green: {unreadable}"
+        )
+    return tuple(registrations)
+
+
 def _registered_tools(path: Path) -> int:
-    """Tools a module REGISTERS, in either house form.
+    """Tools a module REGISTERS, in every form FastMCP takes one.
 
     Counting ``async def`` instead would miss the difference that matters: dropping one
     ``mcp.tool(...)(fn)`` line takes a tool off the wire while leaving the coroutine defined, so
-    every count stays green and a tool disappears silently. Both forms are counted.
+    every count stays green and a tool disappears silently.
+
+    ⚠️ "Both forms are counted" is what this said until [GQ-400], and it was true of the HOUSE, not
+    of FastMCP: the decorator and the call position are what this package writes, while the direct
+    call ``mcp.tool(fn, ...)``, which FastMCP registers just the same, was counted by nobody.
+    Measured on 2026-09-16 in a throwaway copy of the tree: a display tool registered that way, or
+    through ``registrar = mcp``, left this whole module green. The reading is
+    :func:`_tool_registrations` now, and it refuses what it cannot classify.
     """
-    found = 0
-    for node in ast.walk(_parsed(path)):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            found += sum(1 for decorator in node.decorator_list if _is_mcp_tool(decorator))
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Call):
-            # ``mcp.tool(...)(fn)``: the call-position form. Requiring the OUTER call's func to
-            # be a call is what keeps a decorator, which ``ast.walk`` also visits on its own, from
-            # being counted a second time.
-            found += _is_mcp_tool(node.func)
-    return found
+    return len(_tool_registrations(_parsed(path), path.name))
 
 
 @cache
@@ -704,9 +796,10 @@ def _typed_dict_fields() -> dict[str, dict[str, str]]:
 def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
     """Registered tool name to the function that implements it, from the two registrar modules.
 
-    Both registration forms, for the same reason :func:`_registered_tools` counts both: server.py
-    decorates, display_tools.py calls ``mcp.tool(...)(fn)`` after the fact, and a decorator-only
-    reader would know nothing about the display tools at all.
+    Every registration form, through the same :func:`_tool_registrations` reading that
+    :func:`_registered_tools` counts with: server.py decorates, display_tools.py calls
+    ``mcp.tool(...)(fn)`` after the fact, and a decorator-only reader would know nothing about the
+    display tools at all.
 
     One discovery, several readers, the return annotation and the parameter names are two
     questions about the same set, and asking each of them its own way is how the two answers start
@@ -720,22 +813,13 @@ def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctio
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                if any(_is_mcp_tool(decorator) for decorator in node.decorator_list):
-                    found[node.name] = node
-            elif (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Call)
-                and _is_mcp_tool(node.func)
-            ):
-                found.update(
-                    {
-                        argument.id: defined[argument.id]
-                        for argument in node.args
-                        if isinstance(argument, ast.Name) and argument.id in defined
-                    }
-                )
+        found.update(
+            {
+                registration.function: defined[registration.function]
+                for registration in _tool_registrations(tree, path.name)
+                if registration.function is not None and registration.function in defined
+            }
+        )
     return found
 
 
@@ -2873,4 +2957,79 @@ def test_no_claim_hard_codes_its_expectation() -> None:
     assert not offenders, (
         "these claims state the answer instead of deriving it, so they would pass by "
         f"construction: {sorted(offenders)}"
+    )
+
+
+def test_the_registration_reader_counts_every_form_and_refuses_the_rest() -> None:
+    """:func:`_tool_registrations` on constructed input, because the real tree holds two forms only.
+
+    Every counted form below registers a tool in FastMCP 3.4.4 (probed with a scratch server for
+    the direct call, in both spellings of its slot), so each must be counted and named. Every
+    refused shape reaches a registrar in a way the reader cannot follow, so a tool registered
+    through it would be on the wire and in no count. Neither the direct call nor any refused shape
+    occurs in ``server.py`` or ``display_tools.py`` (measured 2026-09-16), which is exactly why they
+    are held here and not on the tree: a decision that is inert on the real table survives its own
+    removal unnoticed.
+
+    RED-PROOF: make :func:`_direct_registration_target` answer ``None`` and the counted module is
+    refused at its direct calls; switch the refusal off and every refused shape is reported.
+    """
+    counted = textwrap.dedent(
+        """
+        @mcp.tool
+        async def bare() -> None: ...
+
+        @mcp.tool(annotations=READONLY)
+        async def called() -> None: ...
+
+        def register(mcp: object) -> None:
+            mcp.tool(annotations=READONLY)(later)
+            mcp.tool("named")(renamed)
+            mcp.tool(direct, name="direct")
+            mcp.tool(name_or_fn=keyword)
+        """
+    )
+    registrations = _tool_registrations(ast.parse(counted), "probe.py")
+    named = sorted(str(item.function) for item in registrations)
+    assert named == ["bare", "called", "direct", "keyword", "later", "renamed"], registrations
+
+    findings: list[str] = []
+    for shape, source in (
+        ("an aliased registrar", "registrar = mcp\nregistrar.tool(annotations=READONLY)(later)\n"),
+        ("a registrar kept in a variable", "register = mcp.tool\nregister(later)\n"),
+        ("a factory applied elsewhere", "decorate = mcp.tool(annotations=RO)\ndecorate(later)\n"),
+        ("a ready Tool object", "mcp.add_tool(prepared)\n"),
+    ):
+        try:
+            _tool_registrations(ast.parse(source), "probe.py")
+        except AssertionError as refusal:
+            if "probe.py:" not in str(refusal):
+                findings.append(f"{shape}: refused without naming where: {refusal}")
+            continue
+        findings.append(f"{shape}: not refused, so a tool registered that way is counted by nobody")
+    assert not findings, "_tool_registrations misreads a registrar:\n  " + "\n  ".join(findings)
+
+
+def test_no_other_module_reaches_the_registrar() -> None:
+    """A tool registered anywhere but ``server.py`` and ``display_tools.py`` is in no lane count.
+
+    Every lane claim reads exactly those two modules, so a registration in a third one would put a
+    tool on the wire that the core, the display and the full count all leave out, with every claim
+    green. This asks the whole shipped package for a registrar attribute outside those two. Syntax
+    only, like :func:`_tool_registrations`, so ``getattr(mcp, "tool")`` stays out of reach.
+
+    RED-PROOF: a ``registrar.tool(name=...)(fn)`` line in any other module of the package, even in
+    code that never runs, is reported with its file and line.
+    """
+    registrars = {_SRC / "server.py", _SRC / "display_tools.py"}
+    elsewhere = [
+        f"{path.relative_to(_SRC).as_posix()}:{node.lineno}: {ast.unparse(node)}"
+        for path in _package_modules()
+        if path not in registrars
+        for node in ast.walk(_parsed(path))
+        if isinstance(node, ast.Attribute) and node.attr in _REGISTRAR_ATTRIBUTES
+    ]
+    assert not elsewhere, (
+        "a tool registrar is reached outside the two registrar modules the lane counts read, so a "
+        f"tool registered there is counted by nobody: {elsewhere}"
     )
