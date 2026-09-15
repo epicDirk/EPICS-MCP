@@ -538,6 +538,47 @@ def _always_present_constants() -> int:
     return sum(1 for name in vars(ts) if name.endswith("_ALWAYS_PRESENT"))
 
 
+@cache
+def _explicit_always_present_rows() -> int:
+    """Rows of ``_ALWAYS_PRESENT_BY_TOOL`` written out one by one, counted in the literal itself.
+
+    The sentence is about the EXPLICIT rows, the ones that "point straight at the constant its
+    sibling conformance test declares", as opposed to the Olog rows a ``**`` splat contributes. What
+    was measured instead was the dict's length minus the Olog table's, which is the same number only
+    while no explicit key repeats a splatted one. Measured on 2026-09-16 in a throwaway copy: an
+    explicit row for a tool the splat already carries is a twelfth row in the source, Python keeps
+    the later value under the one key, and the subtraction went on answering the old number with the
+    whole module green.
+
+    Loud when the literal is gone, and when an explicit value is anything but a bare name: "point
+    straight at" is the half of the sentence a syntax tree can check. Whether the name is the one
+    that tool's OWN sibling test declares stays a human reading.
+    """
+    for node in _module_ast(ts).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_ALWAYS_PRESENT_BY_TOOL"
+            and isinstance(node.value, ast.Dict)
+        ):
+            explicit = [
+                value
+                for key, value in zip(node.value.keys, node.value.values, strict=True)
+                if key is not None
+            ]
+            indirect = [ast.unparse(value) for value in explicit if not isinstance(value, ast.Name)]
+            if indirect:
+                raise AssertionError(
+                    "these explicit rows of _ALWAYS_PRESENT_BY_TOOL do not point straight at a "
+                    f"constant, so the sentence about them is no longer about this set: {indirect}"
+                )
+            return len(explicit)
+    raise AssertionError(
+        "_ALWAYS_PRESENT_BY_TOOL is no longer an annotated dict literal at the module level of "
+        "tests/test_server.py, so the explicit rows cannot be counted where they are written"
+    )
+
+
 def _named_tests(suffix: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
     return [
         node
@@ -1703,8 +1744,8 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "explicit rows",
         r"the (\w+) explicit rows point straight at",
-        lambda: len(ts._ALWAYS_PRESENT_BY_TOOL) - len(ts._OLOG_ALWAYS_PRESENT),
-        reads=("_ALWAYS_PRESENT_BY_TOOL", "_OLOG_ALWAYS_PRESENT"),
+        _explicit_always_present_rows,
+        reads=("tests/test_server.py",),
     ),
     _claim(
         "static-check constants",
