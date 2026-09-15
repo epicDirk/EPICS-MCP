@@ -1136,6 +1136,34 @@ _FIND_CHANNELS_CONFORMANCE = "test_find_channels_structured_output_conforms_to_i
 _ELEMENT_SCHEMA_TEST = "test_typed_output_schema_arrays_declare_their_element_schema"
 
 
+def _return_paths_as_driven(test_name: str) -> int:
+    """The return paths of a TOOL, as far as the conformance test *test_name* drives them.
+
+    ⛔ HONEST SCOPE, decided with [GQ-400] rather than repaired, and the decision is measured. Three
+    sentences describe the TOOL rather than a table: find_channels' own description, and the two
+    module comments on the keys each tool emits on every one of its return paths. The set they name
+    is the tool's return paths; what this counts is the rows of the ``paths`` table the conformance
+    test drives, and the two agree only while that table is complete. Measured on 2026-09-16 in a
+    throwaway copy: a genuine further return in ``_find_channels`` left this whole module green.
+
+    The derivation a reader reaches for was measured and rejected. Counted on 2026-09-16, the
+    ``return`` statements along each delegation chain, nested functions included, answer the
+    table's number for both tools: discover_pvs ends in four, one of them serving three statuses
+    through a single statement, and find_channels in four, two in the disabled branch and two
+    inside the worker ``query_channels`` hands to a thread. But that counts a code STYLE rather
+    than a path: merging two returns into one, or splitting the miss path into three, moves the
+    answer while the tool's paths stand still, and it would redden a correct sentence. A derivation
+    that depends on how the author spelled the control flow is what this module rejects at
+    :func:`_olog_round_trip_tools`.
+
+    What binds tool and table instead, partly: both conformance tests assert that the paths they
+    drive together emit every advertised field, so a new path is noticed when it emits a field no
+    driven path does, and not otherwise. The claims scoped INSIDE those tests describe the table
+    itself and keep reading :func:`_paths_rows` directly.
+    """
+    return _paths_rows(test_name)
+
+
 @cache
 def _olog_query_functions() -> int:
     """``query_olog_*`` coroutines in checkers_olog.py, the "ten" its own header claims."""
@@ -1858,10 +1886,13 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("_OUTPUT_ARRAY_ITEMS",),
     ),
     # --- the return-path tables the real-client conformance tests drive ---------------------------
+    # These two and the tool-description claim below describe the TOOL rather than the table they
+    # are measured against, so they read ``_return_paths_as_driven``, whose docstring carries what
+    # that costs and why no derivation from the code replaces it ([GQ-400]).
     _claim(
         "discover_pvs return paths",
         r"discover_pvs emits on EVERY one of its (\w+) return paths",
-        lambda: _paths_rows(_DISCOVER_CONFORMANCE),
+        lambda: _return_paths_as_driven(_DISCOVER_CONFORMANCE),
         scope="<module>",
         reads=("tests/test_server.py",),
     ),
@@ -1871,7 +1902,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "find_channels return paths",
         r"find_channels emits on EVERY one of its (\w+) return paths",
-        lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
+        lambda: _return_paths_as_driven(_FIND_CHANNELS_CONFORMANCE),
         scope="<module>",
         reads=("tests/test_server.py",),
     ),
@@ -1936,7 +1967,7 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "find_channels return paths (tool description)",
         r"the (\w+) paths differ further",
-        lambda: _paths_rows(_FIND_CHANNELS_CONFORMANCE),
+        lambda: _return_paths_as_driven(_FIND_CHANNELS_CONFORMANCE),
         reads=("tests/test_server.py",),
     ),
     _claim(
