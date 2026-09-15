@@ -429,15 +429,96 @@ def _provenance_faults(claim: _Claim) -> list[str]:
 # --- the measurements -------------------------------------------------------------------------
 
 
-def _none_valued(mapping: Mapping[str, str | None]) -> int:
-    """Fields the map declares with NO advertised base type.
+@cache
+def _tool_pinned_by(constant: str) -> str:
+    """The tool whose ADVERTISED schema the per-tool map *constant* is held against.
+
+    Read from the test that holds it rather than typed a second time: the row of
+    ``_MAPPED_FIELD_CLAIMS`` names that test, and the test names exactly one tool, in its
+    ``tools[...]`` lookup. Loud when the row, the test or the lookup does not say exactly one
+    thing, because a row pointing at the wrong test is the silent swap an outside QA measured on
+    this table: two maps of the same size traded places and the whole suite stayed green.
+    """
+    rows = [test for test, named in _MAPPED_FIELD_CLAIMS if named == constant]
+    if len(rows) != 1:
+        raise AssertionError(
+            f"{constant} is named by {len(rows)} rows of _MAPPED_FIELD_CLAIMS, and a map that is "
+            "held against a tool needs exactly one"
+        )
+    node = next(
+        (
+            item
+            for item in _module_ast(ts).body
+            if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and item.name == rows[0]
+        ),
+        None,
+    )
+    if node is None:
+        raise AssertionError(
+            f"the row for {constant} names {rows[0]}, which tests/test_server.py no longer defines"
+        )
+    tools: set[str] = {
+        item.slice.value
+        for item in ast.walk(node)
+        if isinstance(item, ast.Subscript)
+        and isinstance(item.value, ast.Name)
+        and item.value.id == "tools"
+        and isinstance(item.slice, ast.Constant)
+        and isinstance(item.slice.value, str)
+    }
+    maps = {
+        item.id
+        for item in ast.walk(node)
+        if isinstance(item, ast.Name) and item.id.endswith("_BASE_TYPE")
+    }
+    if len(tools) != 1 or maps != {constant}:
+        raise AssertionError(
+            f"the row for {constant} names {rows[0]}, which looks up the tools {sorted(tools)} and "
+            f"reads the maps {sorted(maps)}; a row must name the test that reads its own map, for "
+            "exactly one tool"
+        )
+    return next(iter(tools))
+
+
+def _none_valued(constant: str) -> int:
+    """Fields the per-tool map *constant* declares with NO advertised base type.
 
     ``None`` means specifically ``object | None``. An ``X | None`` with a concrete ``X`` still
     carries its non-null type (``archived: bool | None`` maps to ``"boolean"``), so the estate's
     "enrichment fields" are not simply its nullable fields. Every claim below that counts an
     enrichment, topology or type-info subset rests on that distinction.
+
+    ⚠️ UNTIL [GQ-400] THAT DISTINCTION WAS A SENTENCE, NOT A PROPERTY. The map carries what
+    ``tests.test_server._base_type`` reads off the advertised schema, and that is ``None`` for every
+    property without a non-null type, a plain non-nullable ``object`` included. Measured on
+    2026-09-16 in a throwaway copy: one such field added to the is_archived result made four TRUE
+    enrichment sentences go red, each with an instruction to write a false number into it. So every
+    ``None`` entry is looked up in the result type of the tool the map is held against
+    (:func:`_tool_pinned_by`), and anything but ``object | None`` there, in any spelling
+    :func:`_union_members` reads, stops the measure with the field and its annotation instead of
+    being counted.
     """
-    return sum(1 for value in mapping.values() if value is None)
+    mapping: Mapping[str, str | None] = getattr(ts, constant)
+    tool = _tool_pinned_by(constant)
+    fields = _typed_dict_fields().get(_tool_result_type().get(tool, ""))
+    if fields is None:
+        raise AssertionError(
+            f"{constant} is held against {tool!r}, whose result type is not among the package's "
+            "TypedDicts"
+        )
+    unnamed = sorted(field for field, base in mapping.items() if base is None)
+    strangers = [
+        f"{field}: {fields.get(field)!r}"
+        for field in unnamed
+        if field not in fields or _union_members(fields[field]) != {"object", "None"}
+    ]
+    if strangers:
+        raise AssertionError(
+            f"{constant} advertises these fields without a base type while the {tool} result "
+            f"annotates them otherwise, so counting them would count a set the sentence does not "
+            f"name: {strangers}"
+        )
+    return len(unnamed)
 
 
 @cache
@@ -1528,6 +1609,9 @@ _MAPPED = r"EXACTLY the (\w+) mapped fields"
 
 # The per-tool "EXACTLY the N mapped fields" line: one row per typed tool, bound by the test it
 # lives in. Every typing step adds one, which is why the family is derived rather than inventoried.
+# The binding is hand-kept, so it is held against the tests themselves by
+# test_every_mapped_field_row_names_the_test_that_reads_its_map ([GQ-400]), and _tool_pinned_by
+# reads the same rows to find the tool a per-tool map is held against.
 _MAPPED_FIELD_CLAIMS: tuple[tuple[str, str], ...] = (
     ("test_archiver_history_exposes_typed_output_schema", "_ARCHIVER_HISTORY_BASE_TYPE"),
     ("test_alarm_configured_exposes_typed_output_schema", "_ALARM_CONFIGURED_BASE_TYPE"),
@@ -1809,11 +1893,19 @@ _CLAIMS: tuple[_Claim, ...] = (
     # --- the per-tool mapped-field lines ---------------------------------------------------------
     *_mapped_field_claims(),
     # --- the ``X | None`` subsets of the per-tool maps --------------------------------------------
+    # The ten claims below read their map through :func:`_none_valued`, which is why each declares
+    # the sources that reading touches: its own map, the test that holds the map against the wire,
+    # the registrar the tool's result type is resolved through, and the module that declares it.
     _claim(
         "archive-status enrichment fields",
         r"The (\w+) DS-4A/AR-D enrichment fields",
-        lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
-        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
+        lambda: _none_valued("_ARCHIVE_STATUS_BASE_TYPE"),
+        reads=(
+            "_ARCHIVE_STATUS_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "services/checkers.py",
+        ),
     ),
     # The detector cannot see this one: four words sit between the number and its noun and the gap
     # allows two. A claim is matched against the block text directly, so it guards the sentence
@@ -1822,58 +1914,103 @@ _CLAIMS: tuple[_Claim, ...] = (
     _claim(
         "archive-status enrichment fields (exposes note)",
         r"The (\w+) ``object \| None`` enrichment fields",
-        lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
+        lambda: _none_valued("_ARCHIVE_STATUS_BASE_TYPE"),
         scope="test_is_archived_exposes_typed_output_schema",
-        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
+        reads=(
+            "_ARCHIVE_STATUS_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "services/checkers.py",
+        ),
     ),
     _claim(
         "archive-status enrichment fields (runtime note)",
         r"status \+ the (\w+) enrichment fields",
-        lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
-        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
+        lambda: _none_valued("_ARCHIVE_STATUS_BASE_TYPE"),
+        reads=(
+            "_ARCHIVE_STATUS_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "services/checkers.py",
+        ),
     ),
     _claim(
         "appliance topology fields",
         r"the (\w+) object\|None topology fields",
-        lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
-        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_APPLIANCE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_APPLIANCE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     _claim(
         "archive-info projection fields",
         r"The (\w+) getPVTypeInfo projection fields",
-        lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
-        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_ARCHIVE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_ARCHIVE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     _claim(
         "archive-info type-info fields",
         r"the (\w+) object\|None type-info fields",
-        lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
-        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_ARCHIVE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_ARCHIVE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     # --- the same subsets, re-stated in src/ where the values are produced -----------------------
     _claim(
         "enrichment fields (validator note)",
         r"bite on these (\w+) fields",
-        lambda: _none_valued(ts._ARCHIVE_STATUS_BASE_TYPE),
-        reads=("_ARCHIVE_STATUS_BASE_TYPE",),
+        lambda: _none_valued("_ARCHIVE_STATUS_BASE_TYPE"),
+        reads=(
+            "_ARCHIVE_STATUS_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "services/checkers.py",
+        ),
     ),
     _claim(
         "type-info fields (builder note)",
         r"the (\w+) type-info fields appear only",
-        lambda: _none_valued(ts._GET_ARCHIVE_INFO_BASE_TYPE),
-        reads=("_GET_ARCHIVE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_ARCHIVE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_ARCHIVE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     _claim(
         "topology fields (builder note)",
         r"the (\w+) projected topology fields",
-        lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
-        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_APPLIANCE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_APPLIANCE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     _claim(
         "topology fields (copy note)",
         r"The (\w+) fields are COPIED UNCONVERTED",
-        lambda: _none_valued(ts._GET_APPLIANCE_INFO_BASE_TYPE),
-        reads=("_GET_APPLIANCE_INFO_BASE_TYPE",),
+        lambda: _none_valued("_GET_APPLIANCE_INFO_BASE_TYPE"),
+        reads=(
+            "_GET_APPLIANCE_INFO_BASE_TYPE",
+            "tests/test_server.py",
+            "server.py",
+            "tools/archiver.py",
+        ),
     ),
     _claim(
         "ChannelInfo fields",
@@ -3032,4 +3169,32 @@ def test_no_other_module_reaches_the_registrar() -> None:
     assert not elsewhere, (
         "a tool registrar is reached outside the two registrar modules the lane counts read, so a "
         f"tool registered there is counted by nobody: {elsewhere}"
+    )
+
+
+def test_every_mapped_field_row_names_the_test_that_reads_its_map() -> None:
+    """``_MAPPED_FIELD_CLAIMS`` is hand-kept, and a swapped pair of rows was invisible.
+
+    The table binds a test scope to a per-tool map by hand, which is the construction this module
+    rejects everywhere else. An outside QA measured what that costs: swapping two rows whose maps
+    have the same size left the whole suite green, and the next ordinary change to one of those maps
+    then accused the OTHER tool's correct sentence, with an instruction to falsify it.
+
+    DECIDED WITH [GQ-400]: the table stays authored, because the row IS the authored statement, and
+    the binding is held against the tests themselves. That is the same reading :func:`_none_valued`
+    needs to find the tool a map is measured against, so it is one mechanism, not a second one to
+    keep right.
+
+    RED-PROOF: swap the maps of two rows whose maps have the same size, discover_pvs and
+    find_channels say, and this reports both rows; the whole module was green under that swap.
+    """
+    faults: list[str] = []
+    for _test, constant in _MAPPED_FIELD_CLAIMS:
+        try:
+            _tool_pinned_by(constant)
+        except AssertionError as fault:
+            faults.append(str(fault))
+    assert not faults, (
+        "these rows of _MAPPED_FIELD_CLAIMS do not name the test that reads their map:\n  "
+        + "\n  ".join(faults)
     )
