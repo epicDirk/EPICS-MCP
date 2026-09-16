@@ -2942,16 +2942,23 @@ def test_inventory_size_is_pinned() -> None:
         ),
         ("_SITELESS_CLAIM_HITS", _SITELESS_CLAIM_HITS, _siteless_claim_hits()),
     )
+    # The watched labels are part of the comparison, not only the two tables: a watched file
+    # with no row and no hit would otherwise sit in neither set and never be reported, which is
+    # exactly what a zero row exists to prevent. Measured before this line: deleting every zero
+    # row left the test green.
+    watched = {label for label, _ in _WATCHED}
     drift = [
         f"{label}: {path} {found.get(path, 0)} vs {pinned.get(path)}"
         for label, pinned, found in tables
-        for path in sorted({*pinned, *found})
+        for path in sorted({*pinned, *found, *watched})
         if found.get(path, 0) != pinned.get(path)
     ]
     assert not drift, (
-        "the number of size-naming phrases or of site-less claim hits changed (table: file found "
-        "vs pinned): " + ", ".join(drift) + ". A phrase was added or removed, update the pin "
-        "together with _CLAIMS/_FROZEN."
+        "the number of size-naming phrases or of site-less claim hits changed, or a watched file "
+        "has no row (table: file found vs pinned): " + ", ".join(drift) + ". Update "
+        "_INVENTORY_SIZES together with _CLAIMS/_FROZEN; update _SITELESS_CLAIM_HITS together "
+        "with _CLAIMS alone, because an _FROZEN row cannot hold a phrase the detector does not "
+        "see."
     )
 
 

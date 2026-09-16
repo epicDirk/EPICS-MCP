@@ -198,9 +198,9 @@ you a green run. Why CI itself cannot execute them, and where their coverage com
       row for it goes **red** (`test_every_frozen_entry_still_exists` finds no such site), and so
       does re-pinning the site count (nothing was added to count). What such a claim DOES add to
       is the file's count of site-less claim hits, `_SITELESS_CLAIM_HITS`, so that one is
-      re-pinned instead. Both were probed. Adding the noun to
-      `COLLECTION_NOUNS` is the other legitimate answer, and it is a bigger change: it re-opens the
-      whole watched estate and will surface phrases that then need rows.
+      re-pinned instead. Both routes were probed. Adding the noun to `COLLECTION_NOUNS` is the
+      other legitimate answer, and it is a bigger change: it re-opens the whole watched estate and
+      will surface phrases that then need rows.
 
     Rewording a sentence means updating its pattern, not its figure. A new claim must also declare
     what it READS (`_Claim.reads`, keyword-only and required); that declaration is traced, so it

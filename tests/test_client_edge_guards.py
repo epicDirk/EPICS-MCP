@@ -100,6 +100,7 @@ anyway, so the whole suite stays green.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from collections import Counter
@@ -124,6 +125,8 @@ from guard_audit import (  # noqa: E402 - needs sys.path above
 from tests.prose_numbers import (  # noqa: E402 - after the sys.path splice above
     ProseBlock,
     ProseSite,
+    _docstring_blocks,
+    _scope_spans,
     iter_blocks,
     iter_sites,
     parse_count,
@@ -418,6 +421,20 @@ _PROSE_FIGURES: tuple[_Figure, ...] = (
         _keys_with_several_targets,
         scope="test_the_recorded_figures_match_the_prose_that_states_them",
     ),
+    # The same docstring restates the two hand-typed table lengths in words; a pattern each, so the
+    # module docstring cannot be corrected while this restatement quietly keeps the old value.
+    _Figure(
+        "either-way findings (figures test docstring)",
+        r'the table: the "(\w+)" and the',
+        lambda: len(_UNOBSERVED_EITHER_WAY),
+        scope="test_the_recorded_figures_match_the_prose_that_states_them",
+    ),
+    _Figure(
+        "never-executed findings (figures test docstring)",
+        r'and the "(\w+)", against',
+        lambda: len(_NEVER_EXECUTED),
+        scope="test_the_recorded_figures_match_the_prose_that_states_them",
+    ),
 )
 
 
@@ -437,28 +454,21 @@ def _own_sites() -> tuple[ProseSite, ...]:
 
 
 @cache
-def _flattened_doc(scope: str) -> str:
-    """The docstring of *scope*, whitespace-normalised the way the detector flattens a paragraph."""
-    if scope == "<module>":
-        doc = __doc__
-    else:
-        owner = globals().get(scope)
-        assert owner is not None, (
-            f"a prose block sits in scope {scope!r}, which this module cannot resolve to a "
-            "function; nested or class-level docstrings need the lookup widened before they can "
-            "be read"
-        )
-        doc = owner.__doc__
-    return " ".join((doc or "").split())
+def _docstring_paragraphs() -> frozenset[ProseBlock]:
+    """The docstring paragraphs of this file, by ORIGIN, read exactly the way ``iter_blocks`` reads.
+
+    The detector keys comment runs and docstring paragraphs by the same qualname, so a block alone
+    cannot say which it is. A first version decided it by text, whether the block's words sit inside
+    the docstring of its scope, and that was measured to misfile a one-line comment quoting a
+    docstring sentence verbatim as a docstring, which would have declared its number derived. The
+    origin cannot be quoted."""
+    source = _THIS_FILE.read_text(encoding="utf-8-sig")
+    tree = ast.parse(source)
+    return frozenset(_docstring_blocks(_THIS_LABEL, tree, _scope_spans(tree)))
 
 
 def _is_docstring_block(block: ProseBlock) -> bool:
-    """A block is a docstring paragraph when its text sits inside the docstring of its scope.
-
-    The detector keys comment runs and docstring paragraphs by the same qualname, so the block
-    alone cannot say which it is; the docstring can. Normalised on both sides, because the detector
-    keeps a double space inside a line while ``str.split`` does not."""
-    return " ".join(block.text.split()) in _flattened_doc(block.qualname)
+    return block in _docstring_paragraphs()
 
 
 def _figure_hits(figure: _Figure) -> list[tuple[ProseBlock, re.Match[str]]]:
@@ -531,7 +541,8 @@ def _figures_without_site() -> tuple[frozenset[str], list[str]]:
 # Numbers the detector finds in this file that NO figure derives, each with the reason. Keyed by
 # (block kind, scope, phrase, value), never by line number, which moves with any edit above it. The
 # rule for a row is the S32 guard's: it pins that the phrase EXISTS, never that its value is right,
-# and a reason has to say why no measure can settle the value.
+# and a reason has to say why no figure reads it: because no measure can settle the value, or,
+# for a comment, because figures read docstrings only and the number stays unread by design.
 _UNDERIVED: dict[tuple[str, str, str, int], str] = {
     # --- the module docstring ---------------------------------------------------------------------
     ("docstring", "<module>", "8), and which guards", 8): (
@@ -602,6 +613,8 @@ _FIGURES_WITHOUT_SITE: frozenset[str] = frozenset(
         "payload vocabulary (restated in the sham bullet)",
         "either-way findings",
         "never-executed findings",
+        "either-way findings (figures test docstring)",
+        "never-executed findings (figures test docstring)",
     }
 )
 
@@ -609,7 +622,9 @@ _FIGURES_WITHOUT_SITE: frozenset[str] = frozenset(
 # gives for its per-file table: a total lets a removal in one place cancel an addition elsewhere,
 # and a sentence demoted from the docstring to a comment would otherwise keep the total unchanged.
 # What escapes the tests above is a second site with the SAME key in the same block; this is
-# the only thing that notices it. Measured on 2026-09-16 after the build, on this file.
+# the only thing that notices it. What escapes this too: a phrase removed and the same phrase,
+# same key, written elsewhere in the same block kind in the same commit, the counts cancel, as
+# the S32 guard says of its per-file table. Measured on 2026-09-16 after the build, on this file.
 _DOCSTRING_SITES = 16
 _COMMENT_SITES = 6
 
@@ -685,7 +700,7 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     in ``_UNDERIVED`` with its reason; the figures whose number the detector cannot see are named in
     ``_FIGURES_WITHOUT_SITE``; and the number of detector sites per block kind is pinned. What NONE
     of that sees, stated so the pin is not read as more than it is: a number whose noun is outside
-    ``prose_numbers.COLLECTION_NOUNS`` ("19 of 98 targets", "55 findings"), a number word above
+    ``prose_numbers.COLLECTION_NOUNS`` ("400 targets", "55 findings"), a number word above
     twenty, a hyphenated number, a number further than the detector's gap from its noun ("85 remain
     once the tests"), and a number with no noun at all. Such a sentence ships unwatched here,
     exactly as the restatements did until each got its own row; widening the noun list re-opens
@@ -748,10 +763,14 @@ def test_the_figures_the_detector_cannot_see_are_named() -> None:
     """The figures whose number is no detector site are listed, in both directions.
 
     Those figures are exactly the ones the site counts below cannot protect, which is why they are
-    named rather than counted. A figure with mixed hits, one carrying a site and one not, is neither
-    and needs a second pattern or a row."""
+    named rather than counted. A figure with mixed hits, one carrying a site and one not, is
+    neither: the prose is corrected, or the wording gets a pattern of its own; no row can hold a
+    hit that is no site."""
     without, mixed = _figures_without_site()
-    assert not mixed, f"figures with hits both with and without a detector site: {mixed}"
+    assert not mixed, (
+        f"figures with hits both with and without a detector site: {mixed}; correct the prose "
+        "or give that wording a pattern of its own, no row can hold a hit that is no site"
+    )
     assert without == _FIGURES_WITHOUT_SITE, (
         "the set of figures the detector cannot see changed (measured vs listed): "
         f"unlisted {sorted(without - _FIGURES_WITHOUT_SITE)}, "
@@ -764,7 +783,9 @@ def test_the_number_of_detector_sites_is_pinned() -> None:
 
     Narrow on purpose, like the S32 guard's per-file pin: what escapes the tests above is a
     second occurrence of a phrase whose key is already inventoried, and a sentence demoted from the
-    docstring to a comment moves both counts at once."""
+    docstring to a comment moves both counts at once. What escapes this pin too is a phrase removed
+    and re-added elsewhere under the same key in the same commit; the counts cancel, as the S32
+    guard says of its per-file table."""
     counts = Counter(_site_kind(site) for site in _own_sites())
     found = (counts["docstring"], counts["comment"])
     assert found == (_DOCSTRING_SITES, _COMMENT_SITES), (
