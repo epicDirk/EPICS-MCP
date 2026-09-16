@@ -104,6 +104,8 @@ import re
 import sys
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -119,15 +121,23 @@ from guard_audit import (  # noqa: E402 - needs sys.path above
     population,
 )
 
-from tests.prose_numbers import parse_count  # noqa: E402 - after the sys.path splice above
+from tests.prose_numbers import (  # noqa: E402 - after the sys.path splice above
+    ProseBlock,
+    ProseSite,
+    iter_blocks,
+    iter_sites,
+    parse_count,
+)
 
 _TESTS_DIR = Path(__file__).resolve().parent
+_THIS_FILE = Path(__file__).resolve()
+_THIS_LABEL = "tests/test_client_edge_guards.py"
 
 
 def _targets_behind_recorded_keys() -> int:
     """How many AST targets the recorded ``module:line`` keys actually cover.
 
-    The number the docstring uses to explain why 19 findings occupy 17 rows. Derived, so the
+    The number the docstring uses to explain why 19 findings occupy 16 rows. Derived, so the
     explanation cannot become a story: if a line stops carrying several targets, this moves.
     """
     return sum(_targets_per_recorded_key().values())
@@ -139,7 +149,7 @@ def _targets_per_recorded_key() -> dict[str, int]:
 
 
 def _keys_with_several_targets() -> int:
-    """How many recorded keys carry more than one target, the reason 19 findings fit in 17 rows.
+    """How many recorded keys carry more than one target, the reason 19 findings fit in 16 rows.
 
     A sum alone would be invariant: split one line into two and merge another, and the total holds
     while the named example goes false. This counts the keys, so the shape of the explanation is
@@ -252,6 +262,25 @@ _RERUN = (
     "sweep --coverage-db <scratch>/cov"
 )
 
+
+@dataclass(frozen=True)
+class _Figure:
+    """A number a docstring of this file states, the measure that decides it, and WHERE it is read.
+
+    ``scope`` names the docstring: ``<module>`` for the module docstring, otherwise the name of a
+    function in this module, which is how the two helper docstrings above and the docstring of the
+    figures test got their own rows instead of staying unread. A figure is read in the docstring
+    paragraphs of its scope only, never in a comment: comments quote retired patterns and retired
+    values on purpose, and a figure that matched there would either alarm on a quotation or, worse,
+    declare a comment's number derived when nothing compares it.
+    """
+
+    label: str
+    pattern: str
+    measure: Callable[[], int]
+    scope: str = "<module>"
+
+
 # S33: the figures the docstring above states, each next to the thing that decides it. Only the
 # figures a SOURCE-LEVEL measurement can settle are here; the coverage-decided pair lives in
 # ``guard_audit.PINNED_COVERAGE`` and is checked by ``sham --check --coverage-db`` instead.
@@ -260,8 +289,8 @@ _RERUN = (
 # three sentences in this file went on stating the old values in the present tense, inside the
 # module whose job is to stop exactly that. They are not named here any more: a figure the tool pins
 # does not need a second, unguarded copy in a comment beside it.
-_PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
-    (
+_PROSE_FIGURES: tuple[_Figure, ...] = (
+    _Figure(
         "tests with a client class double",
         r"(\w+) tests\s+install a client class double",
         lambda: population()[DOUBLES],
@@ -270,54 +299,56 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
     # figure the row above derives: correcting the docstring after the population moved made this
     # pattern MISS and reddened with "the sentence stating it is gone", while leaving the stale
     # number in place kept the file green. The guard rewarded the false prose. Same defect 72e3250
-    # removed from "(\w+) of the 17 keys do", two rows down, and left standing here.
-    (
+    # removed from "(\w+) of the 17 keys do", the row for keys carrying more than one target,
+    # and left standing here.
+    _Figure(
         "of those, carrying payload vocabulary",
         r"(\w+) of those carry payload\s+vocabulary",
         lambda: population()[EDGE_VOCABULARY],
     ),
-    (
+    _Figure(
         "audited targets",
         r"of (\w+) targets",
         lambda: len(enumerate_targets()),
     ),
-    (
+    _Figure(
         "rows in the unobserved table",
         r"the table below has (\w+) rows",
         lambda: len(_UNOBSERVED),
     ),
     # The SECOND statement of the row count, and it was unwatched. The row above catches "the table
-    # below has N rows"; this sentence restates the same N as "those N keys sit on 28 targets", and
+    # below has N rows"; this sentence restates the same N as "those N keys sit on M targets", and
     # nothing compared it, which is why the recipe 72e3250 recorded for exactly this defect ran
     # green again on the shipped code. Two sentences stating one figure need two patterns; a guard
     # over one of them says nothing about the other.
-    (
+    _Figure(
         "keys the targets sit on (restated)",
         r"those (\w+) keys sit on",
         lambda: len(_UNOBSERVED),
     ),
-    (
+    _Figure(
         "targets those rows sit on",
         r"keys sit on (\w+) targets",
         _targets_behind_recorded_keys,
     ),
-    (
+    _Figure(
         "keys carrying more than one target",
         r"(\w+) of those keys do",
         _keys_with_several_targets,
     ),
-    # ``re.search`` takes the FIRST occurrence per pattern, so one row per WORDING and not per
-    # figure. The caveat two lines below the sentences above restates the 28 twice and the eight
-    # once, and the sham bullet restates the vocabulary count, measured, all four could be set to
-    # absurd values with the whole suite green. One pattern per wording is the only shape that
-    # covers them, which is why these look repetitive: they are not duplicates, they are the other
-    # sentences.
-    (
+    # Every occurrence of a pattern is read (``_figure_hits`` uses ``finditer``), so a sentence
+    # repeated verbatim is compared as often as it appears; a DIFFERENT wording of the same figure
+    # still needs its own row. The caveat below the sentences above restates the target total
+    # twice and the multi-key count once, and the sham bullet restates the vocabulary count;
+    # measured, all four could be set to absurd values with the whole suite green until each got
+    # a row. One pattern per wording is the only shape that covers them, which is why these look
+    # repetitive: they are not duplicates, they are the other sentences.
+    _Figure(
         "targets behind the keys (restated in the caveat)",
         r"DERIVED here is the (\w+) and",
         _targets_behind_recorded_keys,
     ),
-    (
+    _Figure(
         "targets behind the keys (restated once more)",
         r"(\w+) counts every target on those lines",
         _targets_behind_recorded_keys,
@@ -326,7 +357,7 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
     # That fragment is five common tokens with no domain word in it, so any earlier sentence of the
     # same shape, and this docstring is dense in them, would capture the row and leave the caveat
     # watched by nothing. A pattern per WORDING only works if the wording identifies its sentence.
-    (
+    _Figure(
         "keys with several targets (restated in the caveat)",
         r"DERIVED here is the \w+ and the (\w+)",
         _keys_with_several_targets,
@@ -335,33 +366,252 @@ _PROSE_FIGURES: tuple[tuple[str, str, Callable[[], int]], ...] = (
     # class that put a superseded pair in this file for a day. Compared to the PIN rather than to a
     # fresh sweep, which is all that can be done without a ctrace run, and is what the docstring
     # below says it does.
-    (
+    _Figure(
         "sham candidates (restated in the sham bullet)",
         r"and (\w+) remain once the tests",
         lambda: PINNED_COVERAGE[SHAM_CANDIDATES],
     ),
-    (
+    _Figure(
         "payload vocabulary (restated in the sham bullet)",
         r"(\w+) of those also carry payload",
         lambda: population()[EDGE_VOCABULARY],
     ),
-    (
+    _Figure(
         "either-way findings",
         r"plus (\w+) where neither polarity",
         lambda: len(_UNOBSERVED_EITHER_WAY),
     ),
-    ("never-executed findings", r"and (\w+) that no test executes", lambda: len(_NEVER_EXECUTED)),
-    (
+    _Figure(
+        "never-executed findings",
+        r"and (\w+) that no test executes",
+        lambda: len(_NEVER_EXECUTED),
+    ),
+    _Figure(
         "raise guards",
         r"the (\w+) RAISE guards",
         lambda: sum(1 for t in enumerate_targets() if t.form == "RAISE-GUARD"),
     ),
-    (
+    _Figure(
         "live-lane modules",
         r"the (\w+) ``\*_live`` modules",
         lambda: len(list(_TESTS_DIR.glob("*_live.py"))),
     ),
+    # The rows below read docstrings OTHER than the module's. They exist because GQ-290 dropped a
+    # row from the table and the pair of helper docstrings, plus the docstring of the figures test,
+    # went on stating the old figures for ten days: the value test read only the module docstring,
+    # so nothing could go red there.
+    _Figure(
+        "rows the findings occupy (helper docstring)",
+        r"occupy (\w+) rows",
+        lambda: len(_UNOBSERVED),
+        scope="_targets_behind_recorded_keys",
+    ),
+    _Figure(
+        "rows the findings fit in (helper docstring)",
+        r"fit in (\w+) rows",
+        lambda: len(_UNOBSERVED),
+        scope="_keys_with_several_targets",
+    ),
+    _Figure(
+        "keys with several targets (figures test docstring)",
+        r"the row count, the (\w+), the RAISE",
+        _keys_with_several_targets,
+        scope="test_the_recorded_figures_match_the_prose_that_states_them",
+    ),
 )
+
+
+# --- the completeness pin: what the S32 detector finds in THIS file, and what reads it ---
+
+
+@cache
+def _own_blocks() -> tuple[ProseBlock, ...]:
+    """Every docstring paragraph and comment run of this file, as the S32 detector cuts them."""
+    return iter_blocks(((_THIS_LABEL, _THIS_FILE),))
+
+
+@cache
+def _own_sites() -> tuple[ProseSite, ...]:
+    """Every number inside a size-naming phrase of this file, by the S32 detector's own rules."""
+    return iter_sites(_own_blocks())
+
+
+@cache
+def _flattened_doc(scope: str) -> str:
+    """The docstring of *scope*, whitespace-normalised the way the detector flattens a paragraph."""
+    if scope == "<module>":
+        doc = __doc__
+    else:
+        owner = globals().get(scope)
+        assert owner is not None, (
+            f"a prose block sits in scope {scope!r}, which this module cannot resolve to a "
+            "function; nested or class-level docstrings need the lookup widened before they can "
+            "be read"
+        )
+        doc = owner.__doc__
+    return " ".join((doc or "").split())
+
+
+def _is_docstring_block(block: ProseBlock) -> bool:
+    """A block is a docstring paragraph when its text sits inside the docstring of its scope.
+
+    The detector keys comment runs and docstring paragraphs by the same qualname, so the block
+    alone cannot say which it is; the docstring can. Normalised on both sides, because the detector
+    keeps a double space inside a line while ``str.split`` does not."""
+    return " ".join(block.text.split()) in _flattened_doc(block.qualname)
+
+
+def _figure_hits(figure: _Figure) -> list[tuple[ProseBlock, re.Match[str]]]:
+    """Every match of *figure* in the docstring paragraphs of its scope, comments excluded."""
+    hits: list[tuple[ProseBlock, re.Match[str]]] = []
+    for block in _own_blocks():
+        if block.qualname != figure.scope or not _is_docstring_block(block):
+            continue
+        hits.extend(
+            (block, match) for match in re.finditer(figure.pattern, block.text, re.IGNORECASE)
+        )
+    return hits
+
+
+def _site_kind(site: ProseSite) -> str:
+    return "docstring" if _is_docstring_block(site.block) else "comment"
+
+
+def _site_key(site: ProseSite) -> tuple[str, str, str, int]:
+    """Block kind, scope, phrase, value: the identity a row in ``_UNDERIVED`` is keyed by.
+
+    The kind is part of the key on purpose. Without it a sentence that leaves the module docstring
+    for a module-level comment keeps its key, because the detector gives both the qualname
+    ``<module>``, and the move is exactly the kind of silent demotion the pin exists to notice."""
+    return (_site_kind(site), site.block.qualname, site.snippet, site.value)
+
+
+def _is_derived(site: ProseSite) -> bool:
+    """Derived means the number sits in the CAPTURE GROUP of a figure read in that very block.
+
+    The group, not the match: the S32 guard measured that a number inside a claim's span but outside
+    its group is as unwatched as one nobody matched. And the same block: a figure is read in the
+    docstring paragraphs of its scope, so a comment's number is never derived, whatever it says."""
+    if not _is_docstring_block(site.block):
+        return False
+    return any(
+        block == site.block and match.start(1) <= site.offset < match.end(1)
+        for figure in _PROSE_FIGURES
+        if figure.scope == site.block.qualname
+        for block, match in _figure_hits(figure)
+    )
+
+
+def _figures_without_site() -> tuple[frozenset[str], list[str]]:
+    """The figures none of whose hits carries a detector site, and the figures with mixed hits.
+
+    A figure with no hit at all is left to the value test, which reports it as gone."""
+    without: set[str] = set()
+    mixed: list[str] = []
+    for figure in _PROSE_FIGURES:
+        hits = _figure_hits(figure)
+        if not hits:
+            continue
+        carries_site = [
+            any(
+                site.block == block and match.start(1) <= site.offset < match.end(1)
+                for site in _own_sites()
+            )
+            for block, match in hits
+        ]
+        if all(carries_site):
+            continue
+        if any(carries_site):
+            mixed.append(figure.label)
+        else:
+            without.add(figure.label)
+    return frozenset(without), mixed
+
+
+# Numbers the detector finds in this file that NO figure derives, each with the reason. Keyed by
+# (block kind, scope, phrase, value), never by line number, which moves with any edit above it. The
+# rule for a row is the S32 guard's: it pins that the phrase EXISTS, never that its value is right,
+# and a reason has to say why no measure can settle the value.
+_UNDERIVED: dict[tuple[str, str, str, int], str] = {
+    # --- the module docstring ---------------------------------------------------------------------
+    ("docstring", "<module>", "8), and which guards", 8): (
+        "the marker of CLAUDE.md point 8, paired by the detector with the noun of the next clause; "
+        "not a count"
+    ),
+    ("docstring", "<module>", "two bg-dthr tests", 2): (
+        "which tests were read by hand on 2026-08-19; a record of that reading, no constant "
+        "holds it"
+    ),
+    ("docstring", "<module>", "four of those five", 4): (
+        "the history of the retired population pair: how many of its five were miscounted; past "
+        "tense about a measurement that no longer exists"
+    ),
+    ("docstring", "<module>", "four of those five", 5): (
+        "the same retired history, its other number"
+    ),
+    ("docstring", "<module>", "three entries", 3): (
+        "the recorded keys sitting in comprehension filters, named inline right after the "
+        "sentence; the audit records no form that would let a measure count them"
+    ),
+    ("docstring", "<module>", "66 tests", 66): (
+        "the live lane's skip count at the time of the 2026-07-25 sweep; historical, the current "
+        "count needs a pytest run and is no figure of this file"
+    ),
+    ("docstring", "<module>", "nine modules", 9): (
+        "how many live modules the lane had at the time of that sweep; historical, the current "
+        "count is the live-lane modules figure"
+    ),
+    # --- the comments above the recorded findings -------------------------------------------------
+    ("comment", "<module>", "four tests", 4): (
+        "how many tests the GQ-290 mutant took down on 2026-09-06; a recorded run, a comment, and "
+        "figures read docstrings only"
+    ),
+    ("comment", "<module>", "four unexpected_payload rows", 4): (
+        "the same recorded run, naming the rows that went red"
+    ),
+    ("comment", "<module>", "two of those four", 2): (
+        "the same recorded run, how many of those rows were new"
+    ),
+    ("comment", "<module>", "four rows", 4): (
+        "the same recorded run, restated with the noun the detector pairs first"
+    ),
+    ("comment", "<module>", "five epics_client rows", 5): (
+        "derivable, the epics_client keys of _UNOBSERVED, but a comment: figures read docstrings, "
+        "so the phrase is pinned to exist and its value is not compared"
+    ),
+    ("comment", "<module>", "17 keys", 17): (
+        "quotes the retired pattern of 72e3250 with the value the table had then; past tense"
+    ),
+}
+
+# The figures whose captured number the S32 detector does not see as a site, so the site counts
+# below say nothing about them and a stale value there is caught by the value test alone. Measured,
+# the reasons are the detector's own limits: a noun outside prose_numbers.COLLECTION_NOUNS
+# (targets, vocabulary, polarity), a bare number with no noun (the caveat), a singular where the
+# list holds the plural (test), and a noun further than the detector's gap allows (remain once the
+# tests). A figure listed here that gains a site, or one missing here that has none, goes red.
+_FIGURES_WITHOUT_SITE: frozenset[str] = frozenset(
+    {
+        "of those, carrying payload vocabulary",
+        "audited targets",
+        "targets those rows sit on",
+        "targets behind the keys (restated in the caveat)",
+        "targets behind the keys (restated once more)",
+        "keys with several targets (restated in the caveat)",
+        "sham candidates (restated in the sham bullet)",
+        "payload vocabulary (restated in the sham bullet)",
+        "either-way findings",
+        "never-executed findings",
+    }
+)
+
+# The hand-kept residual, per block kind. Per kind and not one total, for the reason the S32 guard
+# gives for its per-file table: a total lets a removal in one place cancel an addition elsewhere,
+# and a sentence demoted from the docstring to a comment would otherwise keep the total unchanged.
+# What escapes the tests above is a second site with the SAME key in the same block; this is
+# the only thing that notices it. Measured on 2026-09-16 after the build, on this file.
+_DOCSTRING_SITES = 16
+_COMMENT_SITES = 6
 
 
 def test_client_edge_guard_population_is_pinned() -> None:
@@ -413,7 +663,7 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
     birth rather than by drift; the count is gone rather than corrected, because nothing here reads
     the list it summarised:
 
-    * RE-MEASURED from the code: the population, the target count, the row count, the eight, the
+    * RE-MEASURED from the code: the population, the target count, the row count, the seven, the
       RAISE guards, the live modules, and each of their restatements, one row per wording.
     * COMPARED TO A PIN, which proves the prose matches the recorded audit and NOT a fresh sweep:
       the coverage-decided candidate figure in ``guard_audit.PINNED_COVERAGE``; the other figure
@@ -426,22 +676,99 @@ def test_the_recorded_figures_match_the_prose_that_states_them() -> None:
       no pin, written here and nowhere else. Saying otherwise is the failure this tier list exists
       to prevent, and an earlier version of this paragraph did say otherwise.
 
-    Nor is there a completeness pin here: a figure added to that docstring next month ships
-    unwatched, exactly as five restatements already did until each got its own row. S32's
-    ``test_prose_counters`` has that mechanism; wiring this file into it is separate work.
+    Every figure is read wherever its wording occurs in the docstring of its scope, the module by
+    default and a named function for the helper docstrings, and every occurrence is compared, so a
+    sentence repeated verbatim cannot restate a stale value behind the first one.
+
+    What keeps the list above complete is the group of tests below rather than a promise: every
+    number the S32 detector finds in this file is either inside a figure's capture group or listed
+    in ``_UNDERIVED`` with its reason; the figures whose number the detector cannot see are named in
+    ``_FIGURES_WITHOUT_SITE``; and the number of detector sites per block kind is pinned. What NONE
+    of that sees, stated so the pin is not read as more than it is: a number whose noun is outside
+    ``prose_numbers.COLLECTION_NOUNS`` ("19 of 98 targets", "55 findings"), a number word above
+    twenty, a hyphenated number, a number further than the detector's gap from its noun ("85 remain
+    once the tests"), and a number with no noun at all. Such a sentence ships unwatched here,
+    exactly as the restatements did until each got its own row; widening the noun list re-opens
+    the whole watched estate and is not done from this file.
     """
-    prose = " ".join((__doc__ or "").split())
     wrong: list[str] = []
-    for label, pattern, measure in _PROSE_FIGURES:
-        match = re.search(pattern, prose, re.IGNORECASE)
-        if match is None:
+    for figure in _PROSE_FIGURES:
+        hits = _figure_hits(figure)
+        if not hits:
             wrong.append(
-                f"{label}: the sentence stating it is gone; reword the pattern or restore it"
+                f"{figure.label}: the sentence stating it is gone; reword the pattern or restore it"
             )
             continue
-        stated = parse_count(match.group(1))
-        if stated != measure():
-            wrong.append(f"{label}: the docstring says {stated}, the code says {measure()}")
+        expected = figure.measure()
+        for block, match in hits:
+            stated = parse_count(match.group(1))
+            if stated != expected:
+                wrong.append(
+                    f"{figure.label} at {block.where()}: the docstring says {stated}, "
+                    f"the code says {expected}"
+                )
     assert not wrong, "this module's own docstring no longer describes the code:\n  " + "\n  ".join(
         wrong
+    )
+
+
+def test_every_number_the_detector_finds_is_derived_or_inventoried() -> None:
+    """Every size-naming number here is inside a figure's capture group or in ``_UNDERIVED``.
+
+    This is the completeness pin the docstring above used to say was missing. A new number lands
+    here, not silently in the tree: it gets a figure that reads it, or a row that says in words why
+    nothing can. Measured before this test existed, the docstring of the figures test had stated a
+    retired value for ten days with the whole suite green."""
+    unclaimed = [
+        f"{site.block.where()} {site.value} in {site.snippet!r}\n        key: {_site_key(site)!r}"
+        for site in _own_sites()
+        if not _is_derived(site) and _site_key(site) not in _UNDERIVED
+    ]
+    assert not unclaimed, (
+        "these numbers are neither derived by a figure nor inventoried; add a _Figure row if the "
+        "number follows from the code, or an _UNDERIVED row with the reason it cannot:\n  "
+        + "\n  ".join(unclaimed)
+    )
+
+
+def test_every_underived_row_still_names_a_number_in_this_file() -> None:
+    """A row whose phrase is gone, or whose number a figure now derives, is a table that stopped
+    describing the file."""
+    live = {_site_key(site) for site in _own_sites()}
+    derived = {_site_key(site) for site in _own_sites() if _is_derived(site)}
+    stale = sorted(key for key in _UNDERIVED if key not in live)
+    redundant = sorted(key for key in _UNDERIVED if key in derived)
+    assert not stale, f"_UNDERIVED rows no longer match any number in this file: {stale}"
+    assert not redundant, (
+        f"_UNDERIVED rows for numbers a figure now derives, drop them: {redundant}"
+    )
+
+
+def test_the_figures_the_detector_cannot_see_are_named() -> None:
+    """The figures whose number is no detector site are listed, in both directions.
+
+    Those figures are exactly the ones the site counts below cannot protect, which is why they are
+    named rather than counted. A figure with mixed hits, one carrying a site and one not, is neither
+    and needs a second pattern or a row."""
+    without, mixed = _figures_without_site()
+    assert not mixed, f"figures with hits both with and without a detector site: {mixed}"
+    assert without == _FIGURES_WITHOUT_SITE, (
+        "the set of figures the detector cannot see changed (measured vs listed): "
+        f"unlisted {sorted(without - _FIGURES_WITHOUT_SITE)}, "
+        f"listed but now seen {sorted(_FIGURES_WITHOUT_SITE - without)}"
+    )
+
+
+def test_the_number_of_detector_sites_is_pinned() -> None:
+    """The hand-kept residual: how many size-naming numbers this file holds, per block kind.
+
+    Narrow on purpose, like the S32 guard's per-file pin: what escapes the tests above is a
+    second occurrence of a phrase whose key is already inventoried, and a sentence demoted from the
+    docstring to a comment moves both counts at once."""
+    counts = Counter(_site_kind(site) for site in _own_sites())
+    found = (counts["docstring"], counts["comment"])
+    assert found == (_DOCSTRING_SITES, _COMMENT_SITES), (
+        f"the number of size-naming phrases changed (docstring, comment): found {found}, "
+        f"pinned {(_DOCSTRING_SITES, _COMMENT_SITES)}. A phrase was added, removed or moved; "
+        "update the pin together with _PROSE_FIGURES and _UNDERIVED"
     )
