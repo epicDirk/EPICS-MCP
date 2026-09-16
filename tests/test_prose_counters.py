@@ -1717,9 +1717,9 @@ def _gate_size_of(module: str) -> Callable[[], int]:
 #: ⚠️ WHICH READING, because condition 3 above admits two and they disagree here. These count a
 #: commit as moving the set when the KEY SET changes, value included, which is what a ``_FROZEN``
 #: row is keyed by and therefore the closer measure of the bookkeeping. Counting only a change in
-#: the NUMBER of sites, which is what ``test_inventory_size_is_pinned`` compares, gives 4, 10, 3
-#: and 6 for the same four files: neither reading dominates the other, because a file can hold the
-#: same phrase twice under one heading. Both readings agree on ``SECURITY.md``.
+#: the NUMBER of sites, the site half of what ``test_inventory_size_is_pinned`` compares, gives
+#: 4, 10, 3 and 6 for the same four files: neither reading dominates the other, because a file can
+#: hold the same phrase twice under one heading. Both readings agree on ``SECURITY.md``.
 #: Only ``docs/safety.md`` already has the gate LIST row
 #: that ``test_every_gate_size_scope_has_a_list_row`` would demand; the other three need one
 #: written first. ``CHANGELOG.md`` states the width too and stays out on condition 2, a release
@@ -2744,7 +2744,8 @@ _FROZEN: dict[tuple[str, str, str, int], str] = {
 # Per FILE, not one total. A single number lets an addition cancel a deletion out: measured, a real
 # size-naming sentence could be removed and every test stayed green because an unrelated one
 # appeared elsewhere. Per file narrows that to "added and removed in the SAME file in the same
-# commit". These are the only hand-kept numbers outside ``_FROZEN``'s keys.
+# commit". This table and ``_SITELESS_CLAIM_HITS`` below are the only hand-kept numbers outside
+# ``_FROZEN``'s keys.
 _INVENTORY_SIZES: dict[str, int] = {
     # 79 -> 81 with [GQ-123]: the untyped-tool figures [GQ-117] had to leave unregistered now name
     # their noun, so the detector sees them and both are compared to the registrations.
@@ -2780,6 +2781,28 @@ _INVENTORY_SIZES: dict[str, int] = {
     # therefore invisible to the detector, the same half-repair the operator_guide entry above
     # records, found again in the file a security reviewer reads first.
     "SECURITY.md": 5,
+}
+
+# The second hand-kept table, and it exists because the first one is structurally blind to a whole
+# class of sentence. ``_INVENTORY_SIZES`` counts detector SITES; a claim hit whose captured number
+# is no site (the noun is outside ``COLLECTION_NOUNS``, or further away than the detector's gap, or
+# the number stands in a parenthesis) adds nothing to it, so deleting such a sentence moves no
+# per-file count. Measured on 2026-07-26 (QA finding [45]) and again on 2026-09-16: 8 of 108 claim
+# hits carry no site, all of them in tests/test_server.py, six claims match twice, and no claim does
+# both, so no LIVE escape exists today. The escape needs a site-less sentence whose claim also
+# matches somewhere else: deleting it then left every test in this module green, measured. This
+# table counts exactly that class, per file, with a row for EVERY watched file even at zero,
+# because the comparison below reads a missing row as drift. Same residual as the table above: a
+# site-less hit removed and another one added in the SAME file in the same commit cancel out.
+_SITELESS_CLAIM_HITS: dict[str, int] = {
+    "tests/test_server.py": 8,
+    "services/checkers_olog.py": 0,
+    "services/checkers.py": 0,
+    "tools/archiver.py": 0,
+    "server.py": 0,
+    "operator_guide.md": 0,
+    "display_tools.py": 0,
+    "SECURITY.md": 0,
 }
 
 
@@ -2886,25 +2909,49 @@ def test_every_frozen_entry_still_exists() -> None:
     assert not stale, f"_FROZEN rows no longer match any prose: {stale}"
 
 
+def _siteless_claim_hits() -> Counter[str]:
+    """Claim hits per file whose captured number is no detector site, the class a site count is
+    blind to. Counted per (block, match, claim) exactly as ``_claim_matches`` yields them."""
+    hits: Counter[str] = Counter()
+    for block in _watched_blocks():
+        sites = iter_sites([block])
+        for match, _claim in _claim_matches(block):
+            if not any(match.start(1) <= site.offset < match.end(1) for site in sites):
+                hits[block.path] += 1
+    return hits
+
+
 def test_inventory_size_is_pinned() -> None:
-    """The one hand-kept number in this module, and it is deliberate.
+    """The two hand-kept tables in this module, and both are deliberate.
 
     Narrow on purpose, because the honest residual is narrow: a deleted DERIVED phrase is normally
     caught by ``test_every_claim_still_matches_prose`` and a deleted INVENTORIED one by
     ``test_every_frozen_entry_still_exists``. What escapes both is ONE occurrence of a phrase whose
-    claim or frozen row still matches somewhere else, and several claims do match twice."""
-    actual = Counter(site.block.path for site in iter_sites(_watched_blocks()))
-    drift = {
-        path: (actual.get(path, 0), _INVENTORY_SIZES.get(path))
-        for path in {*_INVENTORY_SIZES, *actual}
-        if actual.get(path, 0) != _INVENTORY_SIZES.get(path)
-    }
+    claim or frozen row still matches somewhere else, and several claims do match twice. The site
+    count catches that residual only for a phrase the detector SEES; a claim hit whose number is no
+    site is invisible to it, which is what the second table is for. On 2026-09-16, 8 of 108 claim
+    hits carried no detector site, six claims matched twice, and no claim did both; a deleted
+    site-less hit whose claim still matched elsewhere had escaped every test here until that count
+    was pinned. What still escapes, for either table: a phrase of the same class removed and
+    another one added in the SAME file in the same commit."""
+    tables: tuple[tuple[str, dict[str, int], Counter[str]], ...] = (
+        (
+            "_INVENTORY_SIZES",
+            _INVENTORY_SIZES,
+            Counter(s.block.path for s in iter_sites(_watched_blocks())),
+        ),
+        ("_SITELESS_CLAIM_HITS", _SITELESS_CLAIM_HITS, _siteless_claim_hits()),
+    )
+    drift = [
+        f"{label}: {path} {found.get(path, 0)} vs {pinned.get(path)}"
+        for label, pinned, found in tables
+        for path in sorted({*pinned, *found})
+        if found.get(path, 0) != pinned.get(path)
+    ]
     assert not drift, (
-        "the number of size-naming phrases changed (file: found vs pinned): "
-        + ", ".join(
-            f"{path} {found} vs {pinned}" for path, (found, pinned) in sorted(drift.items())
-        )
-        + ". A phrase was added or removed, update the pin together with _CLAIMS/_FROZEN."
+        "the number of size-naming phrases or of site-less claim hits changed (table: file found "
+        "vs pinned): " + ", ".join(drift) + ". A phrase was added or removed, update the pin "
+        "together with _CLAIMS/_FROZEN."
     )
 
 

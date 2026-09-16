@@ -64,10 +64,12 @@ PY
 
 ⚠️ **One of the four HAS a guard, and it is not the one on this page.** The total per file is
 pinned in `tests/test_prose_counters._INVENTORY_SIZES` and held against the real count by
-`test_inventory_size_is_pinned`, so a figure added to the guide reddens the suite. What has no
-guard is the COPY of that pin standing here, and the split into compared and inventoried has
-none anywhere. That asymmetry is why the command above exists rather than a promise to keep
-this paragraph fresh.
+`test_inventory_size_is_pinned`, so a figure added to the guide reddens the suite; since
+2026-09-16 the same test also pins, per file, the claim hits whose number the detector sees as
+no site (`_SITELESS_CLAIM_HITS`), the class a site count is blind to. What has no guard is the
+COPY of that pin standing here, and the split into compared and inventoried has none anywhere.
+That asymmetry is why the command above exists rather than a promise to keep this paragraph
+fresh.
 
 ⚠️ **What is rejected, and stays rejected, is a guard over the WHOLE tracked markdown**, not the
 reading of markdown at all. The reader exists and is pointed at a named set of pages; the cost of
