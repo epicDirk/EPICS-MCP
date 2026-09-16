@@ -39,6 +39,12 @@ full one, so a count taken there would pass locally and break the core-only CI, 
 ``tests/test_server.py`` warns about at its own ``_TYPED_OUTPUT_TOOLS``. (This paragraph
 deliberately names no figure. A module that derives the lane counts for five other files must not
 hand-type them in its own docstring, where nothing would ever check them.)
+
+⚠️ One TEST does read the wire, since [GQ-405]: the union reader is held against the schema each
+declared array row advertises. It takes no LENGTH, so the sentence above stands; what changes is
+the cost, because reaching the wire pulls the server stack and through it p4p, numpy and OpenBLAS.
+Measured on 2026-09-16: the module alone runs in about 36 s, 25 s of which is the provenance
+tracer.
 """
 
 from __future__ import annotations
@@ -392,10 +398,13 @@ def _provenance_faults(claim: _Claim) -> list[str]:
     Asymmetric on purpose, because the two seams differ in what they can resolve:
 
     * ``test_server`` names are compared for EQUALITY, the recorder sees each name separately.
-    * FILES are checked in one direction only. Two measures reach their file through
-      ``_typed_dict_fields``, which parses the whole package, so "this file was parsed" cannot be
-      told apart from "some file in ``src`` was parsed". Tightening that needs a third recorder over
-      the index's keys; until then it is stated here rather than implied away.
+    * FILES are checked in one direction only, and since [GQ-400] that half is nearly empty. Every
+      measure that reaches its file through ``_typed_dict_fields`` parses the WHOLE package, so
+      "this file was parsed" cannot be told apart from "some file under ``src`` was parsed", and
+      that now covers the enrichment claims as well as the array and ChannelInfo ones: for them any
+      ``src`` path in ``reads`` is satisfied by the walk. A post-build QA measured it. The
+      declarations stay because they are the honest answer to "which file carries this set", not
+      because they can go red; tightening that needs a third recorder over the index's keys.
 
     FIRST it checks that the recorder did not change the measurement, and that check is here
     because it was needed: the first recorder written for this used ``__getattr__``, ``vars(ts)``
@@ -403,8 +412,14 @@ def _provenance_faults(claim: _Claim) -> list[str]:
     different computation than the guard checks is not evidence about the guard, and it fails
     towards accusing innocent claims, which is the worse direction.
     """
-    untraced = claim.measure()
-    traced, paths, attributes = _trace_measure(claim.measure)
+    try:
+        untraced = claim.measure()
+        traced, paths, attributes = _trace_measure(claim.measure)
+    except AssertionError as refusal:
+        # A measure that refuses is reported as a fault of THIS claim rather than thrown through
+        # the loop: the refusals are preconditions of the module, and letting one end the sweep
+        # leaves every claim after it untraced without saying so.
+        return [f"the measure refused to answer, so nothing about it is traced: {refusal}"]
     declared_files = {entry for entry in claim.reads if entry.endswith(".py")}
     declared_names = set(claim.reads) - declared_files
     observed_names = attributes - _TRACE_ARTEFACTS
@@ -437,8 +452,20 @@ def _tool_pinned_by(constant: str) -> str:
     Read from the test that holds it rather than typed a second time: the row of
     ``_MAPPED_FIELD_CLAIMS`` names that test, and the test names exactly one tool, in its
     ``tools[...]`` lookup. Loud when the row, the test or the lookup does not say exactly one
-    thing, because a row pointing at the wrong test is the silent swap an outside QA measured on
-    this table: two maps of the same size traded places and the whole suite stayed green.
+    thing, because a row pointing at the wrong test is a silent swap. Measured by an outside QA on
+    2026-07-26, on the tree of that day: two maps of the same size traded places, its full lane
+    stayed green, and the next ordinary change to one of those maps then accused the OTHER tool's
+    correct sentence. That QA's own verdict was that this is no defect in the delivered tree, where
+    no row is mis-wired and most swaps are loud; what stays is the silent pair, and this is what
+    makes it loud. Re-measured on 2026-09-16 for this module alone: under the same swap its tests
+    were green.
+
+    ⚠️ It reads the SPELLING of a foreign test, one ``tools[...]`` lookup and one ``*_BASE_TYPE``
+    name. A second lookup in that test, or a renamed local, stops this and with it every claim that
+    reads a per-tool map, with a message about ``_MAPPED_FIELD_CLAIMS`` while the edit was
+    elsewhere. That is the price of deriving the binding rather than typing it a second time: a
+    post-build QA is right that this module rejects derivations from spelling, and here the spelling
+    IS the binding, the alternative being the hand-typed pair this replaced.
     """
     rows = [test for test, named in _MAPPED_FIELD_CLAIMS if named == constant]
     if len(rows) != 1:
@@ -496,8 +523,11 @@ def _none_valued(constant: str) -> int:
     enrichment sentences go red, each with an instruction to write a false number into it. So every
     ``None`` entry is looked up in the result type of the tool the map is held against
     (:func:`_tool_pinned_by`), and anything but ``object | None`` there, in any spelling
-    :func:`_union_members` reads, stops the measure with the field and its annotation instead of
-    being counted.
+    :func:`_union_members` reads, stops the measure instead of being counted.
+
+    ⚠️ BOTH DIRECTIONS, and the second one a post-build QA asked for: a field the result annotates
+    ``object | None`` while its map row carries a concrete base type would go uncounted and unseen,
+    so the two sides are compared as SETS rather than the map's alone.
     """
     mapping: Mapping[str, str | None] = getattr(ts, constant)
     tool = _tool_pinned_by(constant)
@@ -508,16 +538,17 @@ def _none_valued(constant: str) -> int:
             "TypedDicts"
         )
     unnamed = sorted(field for field, base in mapping.items() if base is None)
-    strangers = [
-        f"{field}: {fields.get(field)!r}"
-        for field in unnamed
-        if field not in fields or _union_members(fields[field]) != {"object", "None"}
-    ]
-    if strangers:
+    nullable_opaque = sorted(
+        field
+        for field, annotation in fields.items()
+        if _union_members(annotation) == {"object", "None"}
+    )
+    if unnamed != nullable_opaque:
         raise AssertionError(
-            f"{constant} advertises these fields without a base type while the {tool} result "
-            f"annotates them otherwise, so counting them would count a set the sentence does not "
-            f"name: {strangers}"
+            f"{constant} advertises {unnamed} without a base type while the {tool} result "
+            f"annotates {nullable_opaque} as object | None; the sentences count those fields, so "
+            "the two sides must name the same set. Decide which set the sentence means before "
+            "touching a number."
         )
     return len(unnamed)
 
@@ -551,9 +582,10 @@ def _explicit_always_present_rows() -> int:
     the later value under the one key, and the subtraction went on answering the old number with the
     whole module green.
 
-    Loud when the literal is gone, and when an explicit value is anything but a bare name: "point
-    straight at" is the half of the sentence a syntax tree can check. Whether the name is the one
-    that tool's OWN sibling test declares stays a human reading.
+    Loud when the literal is gone, and when an explicit value is anything but a bare name ending in
+    ``_ALWAYS_PRESENT``: that much of "point straight at the constant" a syntax tree can check, and
+    a post-build QA asked for the name shape rather than the node kind alone. Whether the constant
+    is the one that tool's OWN sibling test declares stays a human reading.
     """
     for node in _module_ast(ts).body:
         if (
@@ -567,11 +599,16 @@ def _explicit_always_present_rows() -> int:
                 for key, value in zip(node.value.keys, node.value.values, strict=True)
                 if key is not None
             ]
-            indirect = [ast.unparse(value) for value in explicit if not isinstance(value, ast.Name)]
+            indirect = [
+                ast.unparse(value)
+                for value in explicit
+                if not (isinstance(value, ast.Name) and value.id.endswith("_ALWAYS_PRESENT"))
+            ]
             if indirect:
                 raise AssertionError(
-                    "these explicit rows of _ALWAYS_PRESENT_BY_TOOL do not point straight at a "
-                    f"constant, so the sentence about them is no longer about this set: {indirect}"
+                    "these explicit rows of _ALWAYS_PRESENT_BY_TOOL do not point straight at an "
+                    "always-present constant, so the sentence about them is no longer about this "
+                    f"set: {indirect}"
                 )
             return len(explicit)
     raise AssertionError(
@@ -696,10 +733,33 @@ def _is_mcp_tool(node: ast.expr) -> bool:
     )
 
 
-#: The attributes through which a FastMCP server takes a tool. ``tool`` is the one this package
-#: writes; ``add_tool`` registers a ready ``Tool`` object and is listed so that a module reaching
-#: for it is REFUSED by :func:`_tool_registrations` rather than silently left uncounted.
-_REGISTRAR_ATTRIBUTES: frozenset[str] = frozenset({"tool", "add_tool"})
+#: The attributes through which a FastMCP server takes a tool or drops one, read off the installed
+#: FastMCP 3.4.4 on 2026-09-16 (``server.py``: ``tool``, ``add_tool``, ``remove_tool``,
+#: ``add_tool_transformation``, ``remove_tool_transformation``, ``mount``, ``import_server``).
+#: ``tool`` is the one this package writes; the others are listed so that a registrar module
+#: reaching for them is REFUSED by :func:`_tool_registrations` rather than silently left uncounted.
+#: Measured the same day: ``mcp.remove_tool("find_device")`` beside the display registrations left
+#: every lane claim green while the registry had one tool fewer.
+#: ⚠️ Hand-kept, like every list of a foreign library's surface, and nothing proves it complete: a
+#: surface it misses is a tool this count does not see. The list is checked against the library the
+#: day somebody reads this, not by a test.
+_REGISTRAR_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        "tool",
+        "add_tool",
+        "remove_tool",
+        "add_tool_transformation",
+        "remove_tool_transformation",
+        "mount",
+        "import_server",
+    }
+)
+
+#: What a module OUTSIDE the two registrars may not reach for. Narrower than the set above on
+#: purpose: ``mount`` is also a ``requests`` session method and is used as one in
+#: ``services/_http.py`` (measured 2026-09-16), so the wide set would accuse a line that registers
+#: nothing. What stays is the pair that only a FastMCP server carries.
+_REGISTRAR_ATTRIBUTES_ELSEWHERE: frozenset[str] = frozenset({"tool", "add_tool"})
 
 
 @dataclass(frozen=True)
@@ -897,14 +957,31 @@ def _typed_dict_index(trees: Iterable[tuple[str, ast.Module]]) -> dict[str, dict
     looking for a deletion that never happened. Neither shape exists in this package today, which is
     why ``test_the_typed_dict_index_refuses_an_inherited_field`` holds the refusal on constructed
     input rather than on the tree.
+
+    ⚠️ The refusal reaches exactly as far as this index sees. A base defined OUTSIDE the package, or
+    a TypedDict imported under another name (``from typing import TypedDict as _TD``), is neither
+    indexed nor refused: the class falls out of the index and the reader that misses it says so.
+    Measured on 2026-09-16 in a throwaway copy, that case still reaches the reader as "ChannelInfo
+    is gone", which is why :func:`_channel_info_fields` now names both of its causes.
+
+    Two TypedDicts of the same NAME are refused as well, and that one a post-build QA found. This
+    index is keyed on the bare name over a package walk in path order, so the file read later
+    answered for both without a word. Measured on 2026-09-16: a second ``ChannelInfo`` in
+    ``tools/validate.py``, which sorts after ``services/channelfinder_client.py``, made the count
+    answer one and accuse the correct sentence of saying six.
     """
     index: dict[str, dict[str, str]] = {}
     classes: list[tuple[str, ast.ClassDef]] = []
+    written: dict[str, str] = {}
+    twice: list[str] = []
     for label, tree in tuple(trees):
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 classes.append((label, node))
                 if any(_is_typed_dict_base(base) for base in node.bases):
+                    if node.name in written:
+                        twice.append(f"{node.name}: {written[node.name]} and {label}")
+                    written[node.name] = label
                     index[node.name] = {
                         item.target.id: ast.unparse(item.annotation).replace(" ", "")
                         for item in node.body
@@ -924,11 +1001,20 @@ def _typed_dict_index(trees: Iterable[tuple[str, ast.Module]]) -> dict[str, dict
                         f"{label}: {target.id} uses the functional TypedDict form without a "
                         "literal field mapping, so its fields cannot be read from the syntax tree"
                     )
+                if target.id in written:
+                    twice.append(f"{target.id}: {written[target.id]} and {label}")
+                written[target.id] = label
                 index[target.id] = {
                     key.value: ast.unparse(annotation).replace(" ", "")
                     for key, annotation in zip(fields.keys, fields.values, strict=True)
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)
                 }
+    if twice:
+        raise AssertionError(
+            "two TypedDicts in this package carry the same name, and this index is keyed on the "
+            "name alone, so whichever file is read later answers for both and a count that names "
+            f"one of them reads the other: {sorted(twice)}"
+        )
     inheriting = sorted(
         f"{label}: {node.name}({', '.join(ast.unparse(base) for base in node.bases)})"
         for label, node in classes
@@ -965,8 +1051,17 @@ def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctio
     One discovery, several readers, the return annotation and the parameter names are two
     questions about the same set, and asking each of them its own way is how the two answers start
     disagreeing.
+
+    ⚠️ The resolution is LOUD, because until a post-build QA measured it this half skipped in
+    silence exactly what the reading above refuses out loud: a registration whose target is not a
+    bare name defined in the same module. Measured on 2026-09-16 in a throwaway copy, with the
+    display registration rewritten as ``mcp.tool(...)(globals()["find_device"])``: the count stayed
+    at four and every display sentence with it, while the name set lost one, and the shipped guide's
+    sentence about the display tools that take a ``context_cap`` was accused of saying three where
+    the set had two. A correct sentence, accused in place of the registration nobody could read.
     """
     found: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    unresolved: list[str] = []
     for path in (_SRC / "server.py", _SRC / "display_tools.py"):
         tree = _parsed(path)
         defined = {
@@ -974,12 +1069,16 @@ def _registered_tool_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctio
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
-        found.update(
-            {
-                registration.function: defined[registration.function]
-                for registration in _tool_registrations(tree, path.name)
-                if registration.function is not None and registration.function in defined
-            }
+        for registration in _tool_registrations(tree, path.name):
+            if registration.function is None or registration.function not in defined:
+                unresolved.append(f"{path.name}:{registration.lineno}")
+                continue
+            found[registration.function] = defined[registration.function]
+    if unresolved:
+        raise AssertionError(
+            "these registrations do not resolve to a function defined in their own registrar "
+            "module, so the tools behind them are counted and then lost, and every set built from "
+            f"the functions is short of them without a word: {unresolved}"
         )
     return found
 
@@ -1156,14 +1255,20 @@ def _channel_info_fields() -> int:
     """Fields of ``ChannelInfo``, a NAMESAKE of the find_channels key count, not the same set.
 
     DECIDED WITH [GQ-400], and it is the rest an outside QA left here: a field ``ChannelInfo``
-    INHERITS was invisible to this count. :func:`_typed_dict_index` refuses both shapes of that
-    now, so the "is gone" below stays what it says, a deletion. ⚠️ "all required", the other half
-    of the sentence this count serves, names no size and stays a human reading: ``total=False`` or
-    a ``NotRequired`` field would make it false with nothing here going red.
+    INHERITS was invisible to this count. :func:`_typed_dict_index` refuses both shapes of that as
+    far as it can see them; where it cannot, because the base is imported under another name or
+    lives outside the package, a post-build QA measured that the reader gets the message below, so
+    the message names that cause as well. ⚠️ "all required", the other half of the sentence this
+    count serves, names no size and stays a human reading: ``total=False`` or a ``NotRequired``
+    field would make it false with nothing here going red.
     """
     fields = _typed_dict_fields().get("ChannelInfo")
     if fields is None:
-        raise AssertionError("ChannelInfo is gone from the package's TypedDicts")
+        raise AssertionError(
+            "ChannelInfo is gone from the package's TypedDicts: deleted, renamed, or inheriting "
+            "from a base this index cannot see, such as a TypedDict imported under another name "
+            "or declared outside the package"
+        )
     return len(fields)
 
 
@@ -1202,6 +1307,15 @@ _FIND_CHANNELS_CONFORMANCE = "test_find_channels_structured_output_conforms_to_i
 #: neighbouring sentence about a different set (see the claims themselves).
 _ELEMENT_SCHEMA_TEST = "test_typed_output_schema_arrays_declare_their_element_schema"
 
+#: Which conformance test drives which tool's return paths, by the NAME of the constant a claim's
+#: derivation hands to its measure and by the test that name resolves to. Both halves are needed:
+#: ``test_every_return_path_claim_reads_the_table_of_its_own_tool`` reads the name out of the
+#: derivation and compares the test against the claim's scope.
+_CONFORMANCE_BY_TOOL: dict[str, tuple[str, str]] = {
+    "discover_pvs": ("_DISCOVER_CONFORMANCE", _DISCOVER_CONFORMANCE),
+    "find_channels": ("_FIND_CHANNELS_CONFORMANCE", _FIND_CHANNELS_CONFORMANCE),
+}
+
 
 def _return_paths_as_driven(test_name: str) -> int:
     """The return paths of a TOOL, as far as the conformance test *test_name* drives them.
@@ -1213,15 +1327,16 @@ def _return_paths_as_driven(test_name: str) -> int:
     test drives, and the two agree only while that table is complete. Measured on 2026-09-16 in a
     throwaway copy: a genuine further return in ``_find_channels`` left this whole module green.
 
-    The derivation a reader reaches for was measured and rejected. Counted on 2026-09-16, the
-    ``return`` statements along each delegation chain, nested functions included, answer the
-    table's number for both tools: discover_pvs ends in four, one of them serving three statuses
-    through a single statement, and find_channels in four, two in the disabled branch and two
-    inside the worker ``query_channels`` hands to a thread. But that counts a code STYLE rather
-    than a path: merging two returns into one, or splitting the miss path into three, moves the
-    answer while the tool's paths stand still, and it would redden a correct sentence. A derivation
-    that depends on how the author spelled the control flow is what this module rejects at
-    :func:`_olog_round_trip_tools`.
+    The derivation a reader reaches for was measured and rejected. Counted on 2026-09-16 over each
+    delegation chain, nested functions included: discover_pvs carries six ``return`` statements and
+    find_channels seven, of which four each are TERMINAL and the rest hand on to the next function
+    in the chain. Four is the table's number for both, so the derivation agrees today. But it counts
+    a code STYLE rather than a path: merging two returns into one, or splitting the concrete-miss
+    path into its three statuses, moves the answer while the tool's paths stand still, and it would
+    redden a correct sentence. A derivation that depends on how the author spelled the control flow
+    is what this module rejects at :func:`_olog_round_trip_tools`. ⚠️ The six and the seven are what
+    a reader re-running that count sees; the four is what is left after subtracting the delegations,
+    ``server.py`` to ``tools``, ``tools`` to ``services``, and the wildcard branch of discover_pvs.
 
     What binds tool and table instead, partly: both conformance tests assert that the paths they
     drive together emit every advertised field, so a new path is noticed when it emits a field no
@@ -1840,11 +1955,16 @@ _CLAIMS: tuple[_Claim, ...] = (
         reads=("_TYPED_OUTPUT_TOOLS", "server.py", "display_tools.py"),
     ),
     # --- family 3: the rows of _ALWAYS_PRESENT_BY_TOOL and the twelve constants ------------------
+    # ⚠️ ``reads`` cannot go red here, and a post-build QA is right to say so: the measure only
+    # PARSES, so the tracer's attribute half is empty on both sides and its file half is
+    # one-directional. What holds this claim to its set is the measure's own refusals, not the
+    # declaration. ``path`` keeps the module-level phrase inside the file that carries it.
     _claim(
         "explicit rows",
         r"the (\w+) explicit rows point straight at",
         _explicit_always_present_rows,
         reads=("tests/test_server.py",),
+        path="tests/test_server.py",
     ),
     _claim(
         "static-check constants",
@@ -2035,6 +2155,7 @@ _CLAIMS: tuple[_Claim, ...] = (
         "find_channels return paths (tool description)",
         r"the (\w+) paths differ further",
         lambda: _return_paths_as_driven(_FIND_CHANNELS_CONFORMANCE),
+        scope="find_channels",
         reads=("tests/test_server.py",),
     ),
     _claim(
@@ -2046,9 +2167,11 @@ _CLAIMS: tuple[_Claim, ...] = (
     # --- the per-tool mapped-field lines ---------------------------------------------------------
     *_mapped_field_claims(),
     # --- the ``X | None`` subsets of the per-tool maps --------------------------------------------
-    # The ten claims below read their map through :func:`_none_valued`, which is why each declares
-    # the sources that reading touches: its own map, the test that holds the map against the wire,
-    # the registrar the tool's result type is resolved through, and the module that declares it.
+    # The claims below read their map through ``_none_valued``, which is why each declares the
+    # sources that reading touches: its own map, the test that holds the map against the wire, the
+    # registrar the tool's result type is resolved through, and the module that declares it. No
+    # figure for how many rows that is: this module is deliberately unwatched, so a count written
+    # here rots exactly the way the counts it guards do.
     _claim(
         "archive-status enrichment fields",
         r"The (\w+) DS-4A/AR-D enrichment fields",
@@ -2694,17 +2817,31 @@ def test_every_claimed_counter_matches_its_set() -> None:
     """A number the prose names must equal the size of the set it is naming.
 
     This is the whole point: the estate re-typed these by hand on every S29 step and got 8 of 18
-    wrong in one build. Going red here means the prose is stale, not that the guard is."""
+    wrong in one build. Going red here means the prose is stale, not that the guard is.
+
+    A measure that REFUSES is collected like a mismatch rather than thrown through the loop. Those
+    refusals are this module's own preconditions and [GQ-400] added several; a post-build QA
+    measured what that costs, because one refusal at the first block ended the run and the rest of
+    the estate went unread. Collected, the report names the refusal AND every drift beside it.
+    """
     wrong: list[str] = []
+    refused: dict[str, str] = {}
     for block in _watched_blocks():
         for match, claim in _claim_matches(block):
             named = parse_count(match.group(1))
-            expected = claim.measure()
+            try:
+                expected = claim.measure()
+            except AssertionError as refusal:
+                refused.setdefault(claim.label, f"{claim.label} refused to answer: {refusal}")
+                continue
             if named != expected:
                 wrong.append(
                     f"{block.where()} {claim.label}: prose says {named}, the set has {expected}"
                 )
-    assert not wrong, "prose counters no longer match their sets:\n  " + "\n  ".join(wrong)
+    assert not wrong and not refused, (
+        "prose counters no longer match their sets, or a measure refused to answer:\n  "
+        + "\n  ".join([*wrong, *sorted(refused.values())])
+    )
 
 
 def test_every_claim_still_matches_prose() -> None:
@@ -2800,19 +2937,23 @@ def test_every_claim_declares_which_source_it_reads() -> None:
       means that object, that stays a human reading, and no construct can replace it.
     * It does not prove the ANSWER depends on what was touched. A measure could read a constant and
       ignore it.
-    * The FILE half is one-directional and, for the two measures that reach their file through
+    * The FILE half is one-directional and, for every measure that reaches its file through
       ``_typed_dict_fields``, nearly free: that index parses the whole package, so "this file was
-      parsed" does not distinguish it from any other file under ``src``.
+      parsed" does not distinguish it from any other file under ``src``. Since [GQ-400] that covers
+      most of the table, see :func:`_provenance_faults`.
 
     All three are stated here rather than left to be discovered.
 
-    Cost, measured rather than estimated: about six seconds for the whole table. That is two cold
-    measurement passes per claim, one traced, one not, because the recorder is compared against the
-    untraced answer, with every memoized helper cleared on both sides of the traced one. The
-    clearing is what the seconds buy: against a warm cache a measure touches nothing at all and the
-    test would pass while proving nothing. Halving it by leaving the caches warm afterwards is
-    possible and deliberately not done, it would let a value computed under the recorder outlive
-    the trace, and a cheap test that can poison the rest of the suite is the wrong trade.
+    Cost, measured rather than estimated, and re-measured on 2026-09-16 after [GQ-400] gave the
+    enrichment claims a measure that parses the package: 25 s for this test, in a module that runs
+    in about 36 s. ⚠️ The figure here read "about six seconds" until that day and had rotted, in a
+    file that is deliberately unwatched; it carries its date now. That cost is two cold measurement
+    passes per claim, one traced, one not, because the recorder is compared against the untraced
+    answer, with every memoized helper cleared on both sides of the traced one. The clearing is what
+    the seconds buy: against a warm cache a measure touches nothing at all and the test would pass
+    while proving nothing. Halving it by leaving the caches warm afterwards is possible and
+    deliberately not done, it would let a value computed under the recorder outlive the trace, and a
+    cheap test that can poison the rest of the suite is the wrong trade.
     """
     faults = [f"{claim.label}: {fault}" for claim in _CLAIMS for fault in _provenance_faults(claim)]
     assert not faults, (
@@ -3224,7 +3365,14 @@ def test_no_claim_hard_codes_its_expectation() -> None:
 
     offenders: list[str] = []
     for claim in _CLAIMS:
-        expected = claim.measure()
+        try:
+            expected = claim.measure()
+        except AssertionError:
+            # A refusing measure has no answer to spell, and this check needs the answer. The
+            # refusal itself is reported where refusals belong, by
+            # test_every_claimed_counter_matches_its_set; letting it end this loop would leave
+            # every claim after it unchecked for a typed-in answer, without a word.
+            continue
         forms = {str(expected)} | {
             word for word, value in pn._WORD_VALUES.items() if value == expected
         }
@@ -3288,7 +3436,9 @@ def test_the_registration_reader_counts_every_form_and_refuses_the_rest() -> Non
         ("an aliased registrar", "registrar = mcp\nregistrar.tool(annotations=READONLY)(later)\n"),
         ("a registrar kept in a variable", "register = mcp.tool\nregister(later)\n"),
         ("a factory applied elsewhere", "decorate = mcp.tool(annotations=RO)\ndecorate(later)\n"),
+        ("a factory that names a tool and is never applied", 'mcp.tool("named")\n'),
         ("a ready Tool object", "mcp.add_tool(prepared)\n"),
+        ("a tool taken off the wire again", 'mcp.remove_tool("later")\n'),
     ):
         try:
             _tool_registrations(ast.parse(source), "probe.py")
@@ -3308,6 +3458,12 @@ def test_no_other_module_reaches_the_registrar() -> None:
     green. This asks the whole shipped package for a registrar attribute outside those two. Syntax
     only, like :func:`_tool_registrations`, so ``getattr(mcp, "tool")`` stays out of reach.
 
+    ⚠️ It reads the ATTRIBUTE NAME, never the object it hangs off, so an ordinary ``record.tool``
+    somewhere under ``src`` reports as a registrar reach. That is why the set it asks for is the
+    narrow ``_REGISTRAR_ATTRIBUTES_ELSEWHERE`` and not the wide one: ``mount`` is a ``requests``
+    session method in this package (measured 2026-09-16). The repair for a false report is to
+    rename the attribute or to narrow that set with the reason, never to drop this test.
+
     RED-PROOF: a ``registrar.tool(name=...)(fn)`` line in any other module of the package, even in
     code that never runs, is reported with its file and line.
     """
@@ -3317,7 +3473,7 @@ def test_no_other_module_reaches_the_registrar() -> None:
         for path in _package_modules()
         if path not in registrars
         for node in ast.walk(_parsed(path))
-        if isinstance(node, ast.Attribute) and node.attr in _REGISTRAR_ATTRIBUTES
+        if isinstance(node, ast.Attribute) and node.attr in _REGISTRAR_ATTRIBUTES_ELSEWHERE
     ]
     assert not elsewhere, (
         "a tool registrar is reached outside the two registrar modules the lane counts read, so a "
@@ -3329,24 +3485,35 @@ def test_every_mapped_field_row_names_the_test_that_reads_its_map() -> None:
     """``_MAPPED_FIELD_CLAIMS`` is hand-kept, and a swapped pair of rows was invisible.
 
     The table binds a test scope to a per-tool map by hand, which is the construction this module
-    rejects everywhere else. An outside QA measured what that costs: swapping two rows whose maps
-    have the same size left the whole suite green, and the next ordinary change to one of those maps
-    then accused the OTHER tool's correct sentence, with an instruction to falsify it.
+    rejects everywhere else. An outside QA measured what that costs on the tree of 2026-07-26:
+    swapping two rows whose maps have the same size left its full lane green, and the next ordinary
+    change to one of those maps then accused the OTHER tool's correct sentence, with an instruction
+    to falsify it. Its verdict was that the delivered tree carries no mis-wired row and that most
+    swaps are loud; the silent pair is what this holds.
 
     DECIDED WITH [GQ-400]: the table stays authored, because the row IS the authored statement, and
     the binding is held against the tests themselves. That is the same reading :func:`_none_valued`
     needs to find the tool a map is measured against, so it is one mechanism, not a second one to
-    keep right.
+    keep right. The ANSWER is used and not only the absence of a refusal, which a post-build QA
+    asked for: two rows may not be held against the same tool.
 
     RED-PROOF: swap the maps of two rows whose maps have the same size, discover_pvs and
-    find_channels say, and this reports both rows; the whole module was green under that swap.
+    find_channels say, and this reports both rows; this module was green under that swap.
     """
     faults: list[str] = []
+    held: dict[str, str] = {}
     for _test, constant in _MAPPED_FIELD_CLAIMS:
         try:
-            _tool_pinned_by(constant)
+            tool = _tool_pinned_by(constant)
         except AssertionError as fault:
             faults.append(str(fault))
+            continue
+        if tool in held:
+            faults.append(
+                f"{constant} and {held[tool]} are both held against {tool!r}, so one of them reads "
+                "a test that pins somebody else's map"
+            )
+        held[tool] = constant
     assert not faults, (
         "these rows of _MAPPED_FIELD_CLAIMS do not name the test that reads their map:\n  "
         + "\n  ".join(faults)
@@ -3403,42 +3570,54 @@ def test_the_element_schema_claims_bind_only_their_own_sentence() -> None:
     )
 
 
-def test_the_typed_dict_index_refuses_an_inherited_field() -> None:
-    """A TypedDict that inherits fields stops the index, in both shapes, on constructed input.
+def test_the_typed_dict_index_refuses_what_it_cannot_key() -> None:
+    """The index stops on an inherited field and on two TypedDicts of one name, constructed here.
 
-    The index reads class bodies and resolves no bases, which is right while nothing inherits and
-    silently wrong the moment something does. Measured on 2026-09-16 in a throwaway copy: a second
-    base beside ``TypedDict`` left the count of ``ChannelInfo``'s fields where it was while the type
-    had gained one, with the whole module green; a single inherited base dropped the class out of
-    the index and reached the reader as "ChannelInfo is gone", which describes a deletion that never
-    happened. Neither shape exists in the package, so the refusal is held here rather than there.
+    It reads class bodies, resolves no bases and keys on the bare class name. Both are right while
+    nothing inherits and no name repeats, and silently wrong the moment one of them changes.
+    Measured on 2026-09-16 in a throwaway copy: a second base beside ``TypedDict`` left the count of
+    ``ChannelInfo``'s fields where it was while the type had gained one, with the whole module
+    green; a single inherited base dropped the class out of the index and reached the reader as
+    "ChannelInfo is gone"; and a second ``ChannelInfo`` in a file that sorts later made the count
+    answer one and accuse the correct sentence of saying six. None of the three exists in the
+    package, so all three are held here rather than there.
 
-    RED-PROOF: switch the refusal off and both shapes below are reported as unrefused.
+    RED-PROOF: switch either refusal off and the shapes below are reported as unrefused.
     """
     base = "class _Provenance(TypedDict):\n    source_url: str\n\n\n"
     findings: list[str] = []
-    for shape, source in (
+    for shape, trees, named in (
         (
             "a second base beside TypedDict",
-            "class ChannelInfo(_Provenance, TypedDict):\n    name: str\n",
+            [("probe.py", base + "class ChannelInfo(_Provenance, TypedDict):\n    name: str\n")],
+            "ChannelInfo",
         ),
         (
             "an inherited TypedDict as the only base",
-            "class ChannelInfo(_Provenance):\n    name: str\n",
+            [("probe.py", base + "class ChannelInfo(_Provenance):\n    name: str\n")],
+            "ChannelInfo",
+        ),
+        (
+            "the same name in two files",
+            [
+                ("early.py", "class Twin(TypedDict):\n    a: str\n"),
+                ("later.py", "class Twin(TypedDict):\n    b: str\n"),
+            ],
+            "Twin",
         ),
     ):
         try:
-            _typed_dict_index([("probe.py", ast.parse(base + source))])
+            _typed_dict_index([(label, ast.parse(source)) for label, source in trees])
         except AssertionError as refusal:
-            if "ChannelInfo" not in str(refusal):
-                findings.append(f"{shape}: refused without naming the class: {refusal}")
+            if named not in str(refusal):
+                findings.append(f"{shape}: refused without naming {named}: {refusal}")
             continue
-        findings.append(f"{shape}: an inherited field went unrefused")
+        findings.append(f"{shape}: went unrefused, so a count would read a set nobody named")
     plain = _typed_dict_index([("probe.py", ast.parse(base))])
     if plain != {"_Provenance": {"source_url": "str"}}:
         findings.append(f"a TypedDict that inherits nothing is no longer read as written: {plain}")
     assert not findings, (
-        "the TypedDict index no longer refuses what it cannot resolve:\n  " + "\n  ".join(findings)
+        "the TypedDict index no longer refuses what it cannot key:\n  " + "\n  ".join(findings)
     )
 
 
@@ -3458,17 +3637,37 @@ async def test_the_union_reader_agrees_with_the_wire_on_every_array_row() -> Non
     schema it advertises, and a disagreement names the row, the annotation and the schema. The
     repair it asks for is teaching the walk the new spelling, never editing a row.
 
+    A row that does not exist YET is reached through a chain rather than by this test:
+    ``_OUTPUT_ARRAY_ITEMS`` is pinned equal to the array-typed properties the wire advertises, by
+    ``test_typed_output_schema_arrays_declare_their_element_schema``, so a new nullable array field
+    forces a row there first and is compared here second. A post-build QA asked for that chain to be
+    named where the reader of this test stands, because it is what makes the work item's "or a new
+    array row" true.
+
     NOT a measurement in the sense of the module header: nothing here takes a LENGTH from
     ``mcp.list_tools()``, only each row's own property, so the lane trap that header describes does
     not apply here. Measured 2026-09-16: no row belongs to a display tool, so the core-only lane
-    reads the same rows. ⚠️ Its reach is the array rows and stops there: an unrecognized spelling
-    on any other field is compared to nothing.
+    reads the same rows; and a row whose tool the running lane does not carry is COLLECTED like a
+    disagreement rather than thrown, so the day that measurement stops holding, the report names the
+    row and the lane instead of a bare lookup error. ⚠️ Its reach is the array rows and stops there:
+    an unrecognized spelling on any other field is compared to nothing.
     """
     advertised = await wire_tools_by_name()
     disagreements: list[str] = []
     for tool, field in ts._OUTPUT_ARRAY_ITEMS:
-        annotation = _array_row_annotation(tool, field)
-        schema = ((advertised[tool].outputSchema or {}).get("properties") or {}).get(field)
+        try:
+            annotation = _array_row_annotation(tool, field)
+        except AssertionError as refusal:
+            disagreements.append(f"{tool}.{field}: {refusal}")
+            continue
+        listed = advertised.get(tool)
+        if listed is None:
+            disagreements.append(
+                f"{tool}.{field}: this lane carries no such tool, so the row cannot be held "
+                "against the schema it advertises"
+            )
+            continue
+        schema = ((listed.outputSchema or {}).get("properties") or {}).get(field)
         if not isinstance(schema, dict):
             disagreements.append(f"{tool}.{field}: the wire advertises no property for this row")
             continue
@@ -3482,4 +3681,43 @@ async def test_the_union_reader_agrees_with_the_wire_on_every_array_row() -> Non
         "the union reader and the advertised schema disagree about a declared array row, so the "
         "nullable-array count is reading a spelling rather than a type; teach the walk the "
         "spelling, do not edit the row:\n  " + "\n  ".join(disagreements)
+    )
+
+
+def test_every_return_path_claim_reads_the_table_of_its_own_tool() -> None:
+    """A return-path claim must count the table of the tool its sentence is about.
+
+    The tool is named twice per claim and was compared nowhere: once by the sentence, through the
+    claim's scope or its pattern, and once by the conformance test handed to the measure. Measured
+    on 2026-09-16 in a throwaway copy: giving the discover_pvs claim the find_channels table left
+    the whole module green, because :func:`_return_path_rows` refuses a disagreement between the two
+    tables, so the two are equal by construction and a swap can never surface as a number.
+
+    The rule, one line per shape: a claim scoped to a conformance test or to the tool's own
+    docstring reads that tool's table; a module-level claim names its tool in the pattern. A claim
+    whose derivation reads BOTH tables is about the pair rather than about one tool, and is skipped
+    here; ``_return_path_rows`` is the one such measure and it raises when they disagree.
+
+    RED-PROOF: swap either conformance constant into the other claim and this reports the pair.
+    """
+    findings: list[str] = []
+    for claim in _CLAIMS:
+        derivation = _derivation_source(claim.measure)
+        read = sorted(
+            tool for tool, (name, _test) in _CONFORMANCE_BY_TOOL.items() if name in derivation
+        )
+        if len(read) != 1:
+            continue
+        tool = read[0]
+        about = claim.scope if claim.scope and claim.scope != "<module>" else ""
+        if about and about not in {tool, _CONFORMANCE_BY_TOOL[tool][1]}:
+            findings.append(f"{claim.label}: scoped to {about!r} but reads the {tool} table")
+        elif not about and tool not in claim.phrase.pattern:
+            findings.append(
+                f"{claim.label}: reads the {tool} table while neither its scope nor its pattern "
+                "names that tool"
+            )
+    assert not findings, (
+        "a return-path claim counts a table that belongs to another tool, and the two tables are "
+        "pinned equal, so no number can show it:\n  " + "\n  ".join(findings)
     )
