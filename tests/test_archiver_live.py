@@ -250,10 +250,17 @@ def test_this_appliance_endpoint_still_has_no_name_filter(client: ArchiverClient
         "getPVsForThisAppliance now honours a pv filter, the list_archived_pvs refusal is no "
         "longer needed and should be replaced by forwarding the glob"
     )
-    # The sibling endpoint DOES filter: the contrast is what makes the refusal (rather than a
-    # blanket 'no filtering here') the right call.
-    by_name = client._get(f"{mgmt}/getAllPVs", {"limit": "5", "pv": glob})
-    assert by_name != unfiltered
+    # The sibling endpoint DOES filter, and that contrast is what makes the refusal (rather than a
+    # blanket 'no filtering here') the right call. Measured on ONE endpoint, getAllPVs with and
+    # without the glob, through the predicate the fixture search uses. Until GQ-395 (2026-09-17)
+    # this compared getAllPVs-with-glob against getPVsForThisAppliance, two endpoints that answer
+    # different lists on a cluster whatever the filter does, so it held when BOTH ignored the
+    # filter (S15 row 7). One measurement, one place: glob_discriminates is the definition; this
+    # probe and test_the_search_verifies_the_glob_this_suite_needs both call it, for two
+    # different claims (the refusal's contrast here, the fixture recipe there).
+    assert glob_discriminates(client, glob), (
+        "getAllPVs no longer honours the pv filter, the contrast behind the refusal is gone"
+    )
 
 
 # --- S11 schema anchors: the strict client schema, pinned against the REAL payloads ---
@@ -337,10 +344,14 @@ def test_the_search_verifies_the_glob_this_suite_needs(client: ArchiverClient) -
     perfectly good fixture PV could still leave the enumeration premise red, and the failure then
     read as a problem with the PV.
 
-    This pins the predicate against the same glob the suite runs on, and it reproduces the
-    LOAD-BEARING half of that premise: that ``getAllPVs`` answers differently with the glob than
-    without it. The sibling assertion, that ``getPVsForThisAppliance`` ignores the filter, is
-    satisfied by a glob that matches nothing at all and cannot stand in for this one.
+    This pins the predicate against the same glob the suite runs on. Since GQ-395 (2026-09-17)
+    ``test_this_appliance_endpoint_still_has_no_name_filter`` calls the same predicate for a
+    different claim: there it is the CONTRAST behind the list_archived_pvs refusal, measured on
+    one endpoint (getAllPVs with and without the glob); here it is the premise the printed
+    fixture recipe rests on, so the search cannot drift away from what this suite demands. One
+    function carries the measurement, two probes carry the two claims. The sibling assertion,
+    that ``getPVsForThisAppliance`` ignores the filter, is satisfied by a glob that matches
+    nothing at all and cannot stand in for this one.
     """
     glob = os.environ["EPICS_MCP_LIVE_ARCHIVER_GLOB"]
 

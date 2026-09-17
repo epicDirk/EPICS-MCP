@@ -1641,3 +1641,82 @@ def test_sibling_probe_sends_one_wire_window_and_a_derived_end(
     assert reference["to"] == "2027-01-01T00:00:00.000Z"
     assert sibling["to"] == "2026-01-01T00:02:01.000Z"
     assert fake.urls == [_GETDATA, _GETDATA]
+
+
+class _UrlKeyedAppliance:
+    """A stand-in MGMT appliance that answers by ENDPOINT and, optionally, by the ``pv`` filter.
+
+    ``answers`` maps an endpoint name to its list; ``filtered`` maps an endpoint name to the list
+    it answers when a ``pv`` parameter is present. An endpoint missing from ``filtered`` IGNORES
+    the filter, which is the class of server the this-appliance probe has to see through.
+    """
+
+    def __init__(
+        self, answers: dict[str, list[str]], filtered: dict[str, list[str]] | None = None
+    ) -> None:
+        self.answers = answers
+        self.filtered = filtered or {}
+        self.urls: list[str] = []
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        self.urls.append(url)
+        endpoint = url.rsplit("/", 1)[-1]
+        if "pv" in params and endpoint in self.filtered:
+            return _resp(self.filtered[endpoint])
+        return _resp(self.answers[endpoint])
+
+
+_THIS_APPLIANCE_PROBE = test_archiver_live.test_this_appliance_endpoint_still_has_no_name_filter
+_MGMT = "http://arch/mgmt/bpl/"
+
+
+def test_this_appliance_probe_goes_red_when_both_endpoints_ignore_the_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 7): the probe compared getAllPVs-with-glob against getPVsForThisAppliance,
+    two endpoints that answer different lists on a cluster whatever the filter does, so it
+    passed when BOTH ignored the filter. The contrast is measured on one endpoint now, and a
+    server on which getAllPVs ignores ``pv`` as well must be red.
+    """
+    monkeypatch.setenv("EPICS_MCP_LIVE_ARCHIVER_GLOB", "DEV-TEST01:*")
+    client = ArchiverClient("http://arch")
+    fake = _UrlKeyedAppliance(
+        {"getPVsForThisAppliance": ["DEV-TEST01:A"], "getAllPVs": ["DEV-TEST01:A", "DEV-TEST01:B"]}
+    )
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="no longer honours the pv filter"):
+        _THIS_APPLIANCE_PROBE(client)
+
+    assert [url.removeprefix(_MGMT) for url in fake.urls] == [
+        "getPVsForThisAppliance",
+        "getPVsForThisAppliance",
+        "getAllPVs",
+        "getAllPVs",
+    ]
+
+
+def test_this_appliance_probe_is_green_when_only_getallpvs_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The positive direction of the same probe: getPVsForThisAppliance ignores ``pv`` (the
+    refusal's premise) while getAllPVs honours it (the refusal's contrast), and the probe passes.
+    """
+    monkeypatch.setenv("EPICS_MCP_LIVE_ARCHIVER_GLOB", "DEV-TEST01:*")
+    client = ArchiverClient("http://arch")
+    fake = _UrlKeyedAppliance(
+        {"getPVsForThisAppliance": ["DEV-TEST01:A"], "getAllPVs": ["DEV-TEST01:A", "DEV-TEST01:B"]},
+        filtered={"getAllPVs": ["DEV-TEST01:A"]},
+    )
+    monkeypatch.setattr(client.session, "get", fake)
+
+    _THIS_APPLIANCE_PROBE(client)
+
+    assert [url.removeprefix(_MGMT) for url in fake.urls] == [
+        "getPVsForThisAppliance",
+        "getPVsForThisAppliance",
+        "getAllPVs",
+        "getAllPVs",
+    ]

@@ -267,18 +267,17 @@ def glob_discriminates(client: ArchiverClient, glob: str) -> bool:
     into its fixture recipe and never checks it, while the live suite hangs two assertions on it.
     A perfect fixture PV can therefore still leave the suite red.
 
-    ⛔ This does NOT reproduce either live assertion literally, and the first version of this
-    docstring claimed it did. Measured: the live test builds ``unfiltered`` from
-    ``getPVsForThisAppliance`` and compares ``getAllPVs``-with-glob against THAT, so its second
-    assertion spans two different endpoints and is satisfied by any glob whenever the two
-    endpoints answer different lists, which on a cluster they routinely do. What is checked here
-    is the property that assertion is FOR, stated in the comment above it: that ``getAllPVs``
-    really filters. Same endpoint, with and without the glob.
-
-    ⚠ That makes this predicate STRICTER than the assertion it guards, which is the safe
-    direction: a glob passing here passes there, and the reverse does not hold. It also means a
-    green run here is not a proof about the live assertion's literal text, and the discrepancy in
-    that text is reported as its own finding rather than quietly patched from this side.
+    Until GQ-395 (2026-09-17) the live probe
+    ``test_this_appliance_endpoint_still_has_no_name_filter`` did NOT measure this: it built
+    ``unfiltered`` from ``getPVsForThisAppliance`` and compared
+    ``getAllPVs``-with-glob against THAT, so its assertion spanned two different endpoints and
+    was satisfied by any glob whenever the two endpoints answer different lists, which on a
+    cluster they routinely do. The first version of this docstring claimed the predicate
+    reproduced that assertion; the discrepancy was reported as a finding (S15 row 7) and is
+    closed: the live probe now calls THIS function for the contrast behind the refusal, and
+    ``test_the_search_verifies_the_glob_this_suite_needs`` calls it for the recipe premise. One
+    function carries the measurement, same endpoint, with and without the glob; two probes carry
+    two claims, so a green run of either is a statement about ``getAllPVs`` honouring ``pv``.
     """
     unfiltered = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5"})
     by_name = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5", "pv": glob})
