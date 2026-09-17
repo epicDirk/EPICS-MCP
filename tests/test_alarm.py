@@ -846,3 +846,55 @@ def test_the_two_spellings_name_one_instant() -> None:
     zoned, naive = test_alarm_live.spellings_of(moment)
     assert (zoned, naive) == ("2026-08-25T09:44:16.935Z", "2026-08-25T09:44:16.935")
     assert test_alarm_live.instant_of(naive) == test_alarm_live.instant_of(zoned)
+
+
+class _IndexedLogger:
+    """A stand-in Alarm Logger that answers by CALL INDEX, not by the start value.
+
+    ``_ZoneSensitiveLogger`` decides on the zone, and that key cannot separate the two compared
+    queries from each other: with the normalisation in the path both carry the same zoned ISO
+    (its own control test above asserts ``zoned == naive``). The probe's order of queries is a
+    property of its code, so this fake pins it: the anchor is call 1, the two compared windows
+    are calls 2 and 3. Every requested URL is kept as well, so a test can assert the ADDRESS and
+    not only the answer (CLAUDE.md, evidence discipline 8).
+    """
+
+    def __init__(self, answers: list[list[dict[str, object]]]) -> None:
+        self.answers = answers
+        self.urls: list[str] = []
+        self.calls: list[dict[str, str]] = []
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        self.urls.append(url)
+        self.calls.append({str(key): str(value) for key, value in params.items()})
+        return _resp(self.answers[len(self.calls) - 1])
+
+
+def test_naive_iso_probe_refuses_an_event_without_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 1): two DIFFERENT lists of events that lack ``message_time`` used to
+    compare EQUAL, because the identity read ``str(e.get(...))`` and both sides collapsed to a
+    ``'None'`` placeholder. The comparison must refuse such an event by the name of the missing
+    field, and it must refuse at the identity, not at the reference or cap guard: those two
+    would mean the fixture was wrong rather than the payload.
+    """
+    client = AlarmClient("http://alarm")
+    logger = _IndexedLogger(
+        [
+            _ALARM_PAGE,  # the anchor page: complete events, so the window derives normally
+            [{"config": "state:/Accelerator/DEV/A0"}],  # the zoned window: no message_time
+            [{"config": "state:/Accelerator/DEV/A1"}],  # the naive window: a DIFFERENT event
+        ]
+    )
+    monkeypatch.setattr(client.session, "get", logger)
+
+    with pytest.raises(AssertionError, match="message_time") as raised:
+        test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    message = str(raised.value)
+    assert "positive control not met" not in message, "the reference guard fired, not the identity"
+    assert "the cap truncated" not in message, "the cap guard fired, not the identity"
+    assert logger.urls == ["http://alarm/search/alarm"] * 3

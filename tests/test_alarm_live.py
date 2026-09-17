@@ -145,13 +145,49 @@ def _count(client: AlarmClient, pv: str, start: str, end: str = "now") -> int:
     return len(_events(client, pv, start, end)[0])
 
 
+#: The two fields an event is identified by in the comparison below, in this order. ``config``
+#: and not ``pv``: ``/search/alarm`` answers state: AND config: documents when no root is given,
+#: and a config: document carries no ``pv`` (the offline fixtures in ``tests/test_alarm.py`` and
+#: ``AlarmClient.get_alarm_history`` both say so), while ``config`` is the schema anchor that
+#: ``_require_alarm_records`` enforces as a string on every document, with the PV name as its
+#: last path segment. ``pv`` stays in the client's projection for the caller's sake, so a reader
+#: can see which PV an event belongs to; it is just not the field this probe identifies by.
+_IDENTITY_FIELDS = ("message_time", "config")
+
+
+def _identity(event: dict[str, object]) -> tuple[str, str]:
+    """The ``(message_time, config)`` identity of one event, or a LOUD failure.
+
+    Until GQ-395 (2026-09-17) the identity read ``str(e.get(...))``, so an event lacking the
+    fields became ``('None', 'None')`` and two DIFFERENT broken lists compared EQUAL: the
+    comparison below could not tell a honoured window from a payload whose shape had changed.
+    The projection allowlist makes ``message_time`` optional and ``_require_alarm_records``
+    admits an empty ``config`` string, so both fields are checked here, by name, before anything
+    is compared. The raw strings are compared, not a parsed instant: both lists come from the
+    same server in the same spelling, and a second way of reading a timestamp beside
+    ``instant_of`` is what that function's docstring rules out.
+
+    The message deliberately avoids the texts of the reference and cap guards: the offline
+    drivers in ``tests/test_alarm.py`` tell the three failures apart by those texts.
+    """
+    values: list[str] = []
+    for field in _IDENTITY_FIELDS:
+        value = event.get(field)
+        assert isinstance(value, str) and value, (
+            f"an event lacks a usable {field!r} (got {value!r}); identities cannot be compared, "
+            "the payload shape changed or the projection dropped the field"
+        )
+        values.append(value)
+    return values[0], values[1]
+
+
 def _identities(events: list[dict[str, object]]) -> list[tuple[str, str]]:
-    """Identify events by ``(message_time, pv)``, the field the server actually filters on.
+    """The sorted identities of *events*, see :func:`_identity`.
 
     Comparing identities rather than counts means a window that returns the right NUMBER of the
     wrong events cannot pass.
     """
-    return sorted((str(e.get("message_time")), str(e.get("pv"))) for e in events)
+    return sorted(_identity(event) for event in events)
 
 
 def instant_of(message_time: object) -> datetime:
