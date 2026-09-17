@@ -1749,3 +1749,18 @@ def test_tag_anchor_passes_on_a_readable_listing(monkeypatch: pytest.MonkeyPatch
 
     assert _outcome_of(lambda: _TAG_ANCHOR(client)) is None
     assert fake.urls == [_TAGS_URL]
+
+
+def test_tag_anchor_goes_red_on_an_empty_tag_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The schema half of the anchor: ``_named_list`` admits any string as a name, the empty one
+    included, so only the anchor's own "non-empty" check refuses it, and a listing with one empty
+    name must be red rather than pinned.
+    """
+    client = OlogClient("http://olog")
+    fake = _IndexedOlog([[{"name": "", "state": "Active"}]])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    outcome = _outcome_of(lambda: _TAG_ANCHOR(client))
+
+    assert isinstance(outcome, AssertionError), f"expected AssertionError, got {outcome!r}"
+    assert fake.urls == [_TAGS_URL]
