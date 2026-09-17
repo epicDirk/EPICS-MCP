@@ -102,8 +102,8 @@ def _wall_clock_of(iso_z: str) -> str:
 #: :func:`_page_bounded_window` returns ``None``, the same three :func:`_bounded_corpus` names; an
 #: empty answer inside a found window stays loud.
 _NO_NOTATION_WINDOW = (
-    "no time window found that fits one page (an empty logbook, entries without a readable "
-    "createdDate, or a window around the newest sample that already overflows one page); the two "
+    "no time window found that fits one page (an empty logbook, entries without a createdDate, or "
+    "a window around the newest sample that already overflows one page); the two "
     "notations have to be compared over the SAME bounded set, and a fixture that cannot supply one "
     "says nothing about whether they agree"
 )

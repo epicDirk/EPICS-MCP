@@ -1629,7 +1629,8 @@ def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
     only through the number and order of the queries, so it says nothing about whether the
     compared queries lie in the derived window; the spy in
     ``test_iso_and_wall_probe_sends_one_wire_window_twice`` holds that. Without the patched
-    normaliser this driver does not raise, which is its own red proof.
+    normaliser the probe does not raise and this driver fails with DID NOT RAISE, which is its own
+    red proof.
     """
     client = OlogClient("http://olog")
     page = _entries((3, 2, 1))

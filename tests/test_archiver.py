@@ -1787,8 +1787,9 @@ def test_sibling_probe_goes_red_when_the_sibling_is_capped(
 def test_sibling_probe_goes_red_when_the_reference_is_not_ok(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A reference whose status is not ``ok`` is unknown, not proven empty: red at the status guard
-    with the status named, not at the positive control that would read it as empty.
+    """A reference whose status is not ``ok`` (here ``empty``, the client's reading of a valid
+    answer without samples) is not evaluable: red at the status guard with the status named, not
+    at the positive control further down.
     """
     client = ArchiverClient("http://arch")
     fake = _IndexedArchiver([_block([]), _block([])])

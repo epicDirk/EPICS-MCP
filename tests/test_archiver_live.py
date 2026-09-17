@@ -165,13 +165,13 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
     and the same count of DIFFERENT samples passed. The whole ``Sample`` records are compared.
 
     THE SIBLING'S END IS DERIVED, NOT ``FIXTURE_WINDOW[1]`` (the GQ-288 repair of the alarm
-    probe: a fixed end in the PAST cannot race). ``FIXTURE_WINDOW[1]`` lies in the future, so a
-    sample archived between the two queries would land on one side only and the comparison would
-    go red without a defect. The sibling asks up to the reference's newest sample plus one second
-    (whether the appliance reads ``to`` inclusively is not measured, the second is the margin); the
-    reference keeps ``FIXTURE_WINDOW`` because that window IS the fixture criterion
-    ``find_moderate_pv`` shares (GQ-289). What remains is a race of one second: a sample archived
-    inside that margin after the reference query lands on the sibling side only.
+    probe: a fixed end in the PAST cannot race). ``FIXTURE_WINDOW[1]`` (2027-01-01) lies in the
+    future as of 2026-09-17, so a sample archived between the two queries would land on one side
+    only and the comparison would go red without a defect. The sibling asks up to the reference's
+    newest sample plus one second (whether the appliance reads ``to`` inclusively is not measured,
+    the second is the margin); the reference keeps ``FIXTURE_WINDOW`` because that window IS the
+    fixture criterion ``find_moderate_pv`` shares (GQ-289). What remains is a race of one second:
+    a sample archived inside that margin after the reference query lands on the sibling side only.
 
     The three guards are load-bearing and were missing. Without the reference guard an aged-out
     window makes this ``[] == []``, green, and no longer a test. Without the cap guard both sides
