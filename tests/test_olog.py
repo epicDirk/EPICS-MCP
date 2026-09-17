@@ -23,6 +23,7 @@ from epics_mcp.services.olog_exceptions import (
     OlogFilterValueError,
     OlogResponseError,
 )
+from epics_mcp.services.olog_time import normalize_olog_time
 from epics_mcp.tools.olog import (
     _get_log_entry,
     _list_log_levels,
@@ -1581,11 +1582,27 @@ def test_iso_and_wall_probe_sends_one_wire_window_twice(monkeypatch: pytest.Monk
     """Direction one: with the normalisation in place the ISO and the wall-clock query carry the
     SAME ``start``, ``end`` and ``tz``, and both ask for the bounded page (``_PAGE`` plus the
     over-fetch of one). That identity is why the live run is green, and it is asserted rather
-    than assumed."""
+    than assumed.
+
+    The wire alone cannot say WHICH window and WHICH spelling went out, because both spellings
+    normalise to one string. A spy on the normaliser therefore records the RAW values in order:
+    the window query and the ISO query carry the derived window itself, the wall-clock query its
+    wall-clock spelling, written out literally rather than through ``_wall_clock_of``. Without it a
+    probe that compared a fixed window, sent the ISO spelling twice, or lost its wall-clock helper
+    stayed green (measured in memory on 2026-09-17, GQ-395). The spy is asserted last, so an older
+    probe with fewer queries still fails at the unpacking above.
+    """
     client = OlogClient("http://olog")
     page = _entries((3, 2, 1))
     fake = _IndexedOlog([_search(page)] * 4)
     monkeypatch.setattr(client.session, "get", fake)
+    seen: list[tuple[str, str]] = []
+
+    def spy(value: str, *, param: str) -> tuple[str, bool]:
+        seen.append((param, value))
+        return normalize_olog_time(value, param=param)
+
+    monkeypatch.setattr(olog_client, "normalize_olog_time", spy)
 
     _NOTATION_PROBE(client)
 
@@ -1595,6 +1612,9 @@ def test_iso_and_wall_probe_sends_one_wire_window_twice(monkeypatch: pytest.Monk
     assert (iso["start"], iso["end"], iso["tz"]) == (wall["start"], wall["end"], wall["tz"])
     assert iso["tz"] == "UTC"
     assert fake.urls == [_SEARCH_URL] * 4
+    derived = [("start", "2025-09-04T15:33:21Z"), ("end", "2025-09-04T15:33:23Z")]
+    wall_clock = [("start", "2025-09-04 15:33:21.000"), ("end", "2025-09-04 15:33:23.000")]
+    assert seen == derived * 2 + wall_clock, f"the raw spellings were {seen!r}"
 
 
 def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
@@ -1616,6 +1636,74 @@ def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
     assert len(fake.calls) == 2, "the window query is the second and last query"
     assert "T" in fake.calls[1]["start"], "the ISO form was expected to reach the server raw"
     assert fake.urls == [_SEARCH_URL] * 2
+
+
+def test_iso_and_wall_probe_skips_when_no_window_fits_one_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No derivable window (here an empty sample page) is a SKIP with the probe's own text. A plain
+    ``return`` in its place would turn a run that could not evaluate anything into a green one.
+    """
+    client = OlogClient("http://olog")
+    fake = _IndexedOlog([_search([])])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    outcome = _outcome_of(lambda: _NOTATION_PROBE(client))
+
+    assert isinstance(outcome, pytest.skip.Exception), f"expected Skipped, got {outcome!r}"
+    assert str(outcome) == test_olog_live._NO_NOTATION_WINDOW
+    assert fake.urls == [_SEARCH_URL]
+
+
+def test_iso_and_wall_probe_goes_red_when_a_notation_query_is_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A notation query that outgrows the page inside the derived window makes the window unsound,
+    and the probe says so instead of comparing two truncated pages that happen to agree.
+    """
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    overflowing = _entries(tuple(range(201, 0, -1)))
+    fake = _IndexedOlog([_search(page), _search(page), _search(overflowing), _search(overflowing)])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="outgrew the page"):
+        _NOTATION_PROBE(client)
+
+    assert fake.urls == [_SEARCH_URL] * 3
+
+
+def test_iso_and_wall_probe_goes_red_when_both_notation_queries_are_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both notation queries empty inside a window whose corpus is not: the two lists are equal,
+    and the probe is still red at the reference guard, because ``[] == []`` proves no agreement.
+    """
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    fake = _IndexedOlog([_search(page), _search(page), _search([]), _search([])])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="positive control not met"):
+        _NOTATION_PROBE(client)
+
+    assert fake.urls == [_SEARCH_URL] * 4
+
+
+def test_iso_and_wall_probe_is_green_when_the_server_reorders_the_same_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comparison is over identities, not over the order a server returns them in: the same
+    entries in the opposite order must agree.
+    """
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    fake = _IndexedOlog([_search(page), _search(page), _search(page), _search(page[::-1])])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    _NOTATION_PROBE(client)
+
+    assert fake.urls == [_SEARCH_URL] * 4
 
 
 def _outcome_of(probe_call: Callable[[], None]) -> BaseException | None:
