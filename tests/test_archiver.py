@@ -1720,3 +1720,104 @@ def test_this_appliance_probe_is_green_when_only_getallpvs_filters(
         "getAllPVs",
         "getAllPVs",
     ]
+
+
+def test_sibling_probe_goes_red_on_equal_times_with_different_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 4), the samples half: the comparison is over whole samples, not over
+    timestamps, so the same ``secs`` with a different ``val`` must be red at the sample comparison,
+    and not at a guard.
+    """
+    client = ArchiverClient("http://arch")
+    fake = _IndexedArchiver([_block(_samples((0, 1, 2), 1.0)), _block(_samples((0, 1, 2), 100.0))])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError) as raised:
+        _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01 00:00:00")
+
+    message = str(raised.value)
+    assert "did not return the reference's samples" in message
+    for guard in (
+        "status=",
+        "the cap truncated",
+        "positive control not met",
+        "cannot discriminate",
+    ):
+        assert guard not in message, f"the {guard!r} guard fired, not the sample comparison"
+    assert fake.urls == [_GETDATA, _GETDATA]
+
+
+def test_sibling_probe_goes_red_when_the_reference_is_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reference the cap truncated is not evaluable, both sides would read as the cap rather
+    than the window. Red at the reference's own guard, before the sibling is asked.
+    """
+    client = ArchiverClient("http://arch")
+    capped = _block(_samples(tuple(range(51)), 1.0))
+    fake = _IndexedArchiver([capped, capped])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match=r"^reference: the cap truncated"):
+        _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01 00:00:00")
+
+    assert fake.urls == [_GETDATA]
+
+
+def test_sibling_probe_goes_red_when_the_sibling_is_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same guard on the sibling's side: an evaluable reference and a sibling the cap truncated
+    is red at the sibling's guard, not at the sample comparison it would otherwise reach.
+    """
+    client = ArchiverClient("http://arch")
+    reference = _block(_samples((0, 1, 2), 1.0))
+    fake = _IndexedArchiver([reference, _block(_samples(tuple(range(51)), 1.0))])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="the cap truncated") as raised:
+        _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01 00:00:00")
+
+    assert not str(raised.value).startswith("reference"), "the reference's guard fired"
+    assert fake.urls == [_GETDATA, _GETDATA]
+
+
+def test_sibling_probe_goes_red_when_the_reference_is_not_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reference whose status is not ``ok`` is unknown, not proven empty: red at the status guard
+    with the status named, not at the positive control that would read it as empty.
+    """
+    client = ArchiverClient("http://arch")
+    fake = _IndexedArchiver([_block([]), _block([])])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match=r"^reference: status="):
+        _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01 00:00:00")
+
+    assert fake.urls == [_GETDATA]
+
+
+def test_this_appliance_probe_goes_red_when_this_appliance_starts_filtering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the same probe, the refusal's PREMISE: once getPVsForThisAppliance
+    honours ``pv``, the list_archived_pvs refusal is no longer needed, and the probe says so before
+    it measures the contrast.
+    """
+    monkeypatch.setenv("EPICS_MCP_LIVE_ARCHIVER_GLOB", "DEV-TEST01:*")
+    client = ArchiverClient("http://arch")
+    fake = _UrlKeyedAppliance(
+        {"getPVsForThisAppliance": ["DEV-TEST01:A"], "getAllPVs": ["DEV-TEST01:A", "DEV-TEST01:B"]},
+        filtered={"getPVsForThisAppliance": [], "getAllPVs": ["DEV-TEST01:A"]},
+    )
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="now honours a pv filter"):
+        _THIS_APPLIANCE_PROBE(client)
+
+    assert [url.removeprefix(_MGMT) for url in fake.urls] == [
+        "getPVsForThisAppliance",
+        "getPVsForThisAppliance",
+    ]
