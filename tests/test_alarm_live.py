@@ -225,7 +225,23 @@ def spellings_of(moment: datetime) -> tuple[str, str]:
 
 
 def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
-    """The baseline, without events the probes below would prove nothing."""
+    """The baseline, without events the probes below would prove nothing.
+
+    WHAT IT SEES AND WHAT IT DOES NOT, measured offline on 2026-09-17 (GQ-395, S15 row 6) with a
+    recorded transport. A logger that cannot read the amount answers an empty list (class A, the
+    measured behaviour of both services on an unreadable value, see ``_time_window``): this probe
+    goes red, but with the message below, which names an unusable fixture rather than a server,
+    and so does ``test_naive_iso_window_is_honoured`` at its reference guard. A logger that DROPS
+    the amount answers everything (class B): this probe and every other relative query of this
+    module stay green, because each is asserted as "not empty" or derives its window from a page
+    that class B returns in full. The CLIENT half is pinned offline and mutant-proven in
+    ``tests/test_alarm.py``: ``test_get_alarm_history_relative_amount_passes_through`` (since
+    6b013fe, 2026-07-15) and the anchor assertion of
+    ``test_naive_iso_probe_is_green_while_the_client_normalises`` (since 9dbc097, 2026-09-08) go
+    red when the client collapses the amount to *now* or stops sending it. The SERVER half, class
+    B, is an open, unmeasured entry in the opi-foundry workspace roadmap (its evidence folder is
+    ``analysis/gq395-live-test-wachen-2026-09-17`` in the workspace).
+    """
     assert _count(client, pv, "7 days"), f"no alarm history for {pv!r}: pick a PV that has some"
 
 

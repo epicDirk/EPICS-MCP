@@ -159,9 +159,25 @@ def test_relative_window_agrees_with_absolute(client: OlogClient) -> None:
     HONEST LIMIT: read before trusting this: the two windows are NOT the same instant ('3650
     days' is clock-relative, the absolute one is fixed) and on a young logbook both simply contain
     EVERY entry, which is why they agree. So this pins that a relative amount PARSES and is not
-    rejected, it cannot see a relative window that is dropped entirely, because searching
-    everything returns the same total. The boundary itself is pinned by
-    test_narrow_window_discriminates; that is where a dropped window goes red.
+    rejected.
+
+    WHAT IT SEES AND WHAT IT DOES NOT, measured offline on 2026-09-17 (GQ-395, S15 row 5) with a
+    recorded transport. Two server classes exist for a relative amount. A server that cannot read
+    it collapses the window to *now* and answers an empty list (class A, the measured behaviour of
+    both services on an unreadable value, see ``_time_window``): this probe goes red at its
+    comparison, ``relative`` becomes 0 against a full ``absolute``. A server that DROPS the amount
+    answers everything up to *now* (class B): this probe stays green, and so does every other
+    relative query of this module, because each is asserted as "not empty" or against a side that
+    also returns everything. The CLIENT half is pinned offline and mutant-proven in
+    ``tests/test_olog.py`` (``test_search_logbook_relative_window_not_rewritten_and_sends_no_tz``
+    and ``test_search_logbook_mixed_window_still_sends_tz``, since 41803b9, 2026-07-15): they go
+    red when the client collapses the amount to *now* or stops sending it. The SERVER half, class
+    B, is an open, unmeasured entry in the opi-foundry workspace roadmap (its evidence folder is
+    ``analysis/gq395-live-test-wachen-2026-09-17`` in the workspace); a mixed window, relative
+    start with a data-derived absolute end, would see it and rests on server properties nobody
+    has measured. The boundary of an ABSOLUTE window is pinned by
+    test_narrow_window_discriminates; that is where a dropped absolute window goes red, and it
+    says nothing about a dropped relative amount.
     """
     relative = client.search_logbook(start="3650 days", size=200)[2]
     absolute = _hits(client, *_WIDE_ISO)
