@@ -1528,8 +1528,8 @@ class _IndexedOlog:
 
 class _NotationSensitiveOlog(_IndexedOlog):
     """An Olog that cannot read ISO-8601: a ``start`` carrying a ``T`` degrades to *now* and is
-    answered with a well-formed EMPTY page, which is the measured behaviour this module's live
-    probes exist for. Every other query is answered by call index."""
+    answered with a well-formed EMPTY page, which is the measured behaviour the live probes of
+    tests/test_olog_live.py exist for. Every other query is answered by call index."""
 
     def __call__(self, url: str, **kwargs: object) -> Mock:
         params = kwargs["params"]
@@ -1581,7 +1581,7 @@ def test_iso_and_wall_probe_goes_red_on_equal_counts_with_different_entries(
 def test_iso_and_wall_probe_sends_one_wire_window_twice(monkeypatch: pytest.MonkeyPatch) -> None:
     """Direction one: with the normalisation in place the ISO and the wall-clock query carry the
     SAME ``start``, ``end`` and ``tz``, and both ask for the bounded page (``_PAGE`` plus the
-    over-fetch of one). That identity is why the live run is green, and it is asserted rather
+    over-fetch of one). That identity is why a live run can be green, and it is asserted rather
     than assumed.
 
     The wire alone cannot say WHICH window and WHICH spelling went out, because both spellings
@@ -1623,7 +1623,14 @@ def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
     """Direction two: THE regression, reproduced. Without the normalisation the ISO form reaches
     an Olog raw, the server takes it as *now* and answers empty. The probe goes red at its
     REFERENCE guard, because the bounded window itself is derived through an ISO query, which is
-    the first query that needs the normalisation; the wall-clock query never runs."""
+    the first query that needs the normalisation; the wall-clock query never runs.
+
+    What it does NOT hold (measured 2026-09-17, GQ-395): against the pre-GQ-395 probe it goes red
+    only through the number and order of the queries, so it says nothing about whether the
+    compared queries lie in the derived window; the spy in
+    ``test_iso_and_wall_probe_sends_one_wire_window_twice`` holds that. Without the patched
+    normaliser this driver does not raise, which is its own red proof.
+    """
     client = OlogClient("http://olog")
     page = _entries((3, 2, 1))
     fake = _NotationSensitiveOlog([_search(page)] * 4)
@@ -1725,10 +1732,10 @@ _TAGS_URL = "http://olog/tags"
 def test_tag_anchor_skips_instead_of_passing_vacuously_on_an_empty_listing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """F3 (GQ-395): the tag schema anchor asserted ``all(...)`` over the listing, so an EMPTY
-    listing passed as if it had pinned something. It is a skip now, with the reason printed, and
-    the address the listing came from is asserted as well (evidence discipline 8 names exactly
-    ``list_tags`` at the wrong URL as the measured example).
+    """The empty tag listing (GQ-395): the tag schema anchor asserted ``all(...)`` over the
+    listing, so an EMPTY listing passed as if it had pinned something. It is a skip now, with the
+    reason printed, and the address the listing came from is asserted as well (evidence discipline
+    8 names exactly ``list_tags`` at the wrong URL as the measured example).
     """
     client = OlogClient("http://olog")
     fake = _IndexedOlog([[]])

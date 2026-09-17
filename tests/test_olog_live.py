@@ -291,28 +291,33 @@ def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
 
 #: Why the tag anchor pinned nothing: the listing is empty. Not "a fresh Olog": a stock Olog seeds
 #: the tag "alarm" from default_tags.json on EVERY start with elasticsearch.create.indices=true
-#: (its default), provided the tag's document is absent. So an empty listing means one of three
-#: things, measured in the Olog sources on 2026-09-17: create.indices=false, default.tags.url
-#: naming another list, or the default tags deleted, which only sets state=Inactive (the document
-#: stays, so a restart never re-creates it, and the listing filters on Active).
+#: (its default), provided the tag's document is absent. Causes of an empty listing, read in the
+#: Olog sources (phoebus-olog 6af8c7e) on 2026-09-17, include: create.indices=false,
+#: default.tags.url naming another list, the default tags deleted, which only sets state=Inactive
+#: (the document stays, so a restart never re-creates it, and the listing filters on Active), or
+#: the seeding failing at start with an I/O error, which the server only logs as a warning and
+#: retries on the next start. A server defect that answers an empty list is not told apart here.
 _NO_TAGS = (
-    "the tag listing is empty, so the tag schema anchor pins nothing here: this Olog runs with "
-    "create.indices=false, or default.tags.url names another list, or its default tags were "
-    "deleted (a delete only sets state=Inactive, and a restart never re-creates an existing "
-    "document)"
+    "the tag listing is empty, so the tag schema anchor pins nothing here; causes read in the "
+    "Olog sources include create.indices=false, a default.tags.url naming another list, deleted "
+    "default tags (a delete only sets state=Inactive, and a restart never re-creates an existing "
+    "document), or seeding that failed at start with an I/O error (logged only as a warning); a "
+    "server defect answering an empty list is not told apart here"
 )
 
 
 def test_tags_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
-    """S11 anchor for ``GET /tags`` (F3, GQ-395): the listing is a list of non-empty names.
+    """S11 anchor for ``GET /tags`` (the empty tag listing, GQ-395): a list of non-empty names.
 
     Split out of ``test_live_payloads_satisfy_the_strict_schema`` on 2026-09-17: there the
     assertion ran ``all(...)`` over a possibly EMPTY list and passed vacuously, so an empty
-    listing looked exactly like a pinned one. An empty listing is a SKIP with the reasons above:
-    decision JB keeps a skip inside a running probe, one that reports the DATA cannot
-    discriminate, a skip, because it is not a missing prerequisite (``EPICS_MCP_REQUIRE_LIVE``
-    acts only through ``assert_live_available``); a demanded run passes ``-rsfE`` so the reason
-    is printed. Unreadable listings stay loud through ``_named_list`` (S11).
+    listing looked exactly like a pinned one. An empty listing is a SKIP with the reasons above,
+    under the rule in ``tests/live_gate.py`` that a data-dependent skip inside a running probe
+    stays a skip: it reports that the DATA cannot discriminate, not a missing prerequisite
+    (``EPICS_MCP_REQUIRE_LIVE`` acts only through ``assert_live_available``). pytest's default
+    report does not print skip reasons; a demanded run should add s to the report characters and
+    keep f and E (-rsfE, not -rs alone). Unreadable listings stay loud through ``_named_list``
+    (S11).
     """
     tags = client.list_tags()
     if not tags:
@@ -388,7 +393,7 @@ def _page_bounded_window(
     """A window around the newest *sample* entries whose ENTIRE content fits one page, plus that
     content. ``None`` when this sample cannot supply one.
 
-    WHY THE PROBES BELOW NEED A BOUNDED WINDOW AT ALL. Each of them reads a precondition off one
+    WHY THE PROBES THAT CALL THIS NEED A BOUNDED WINDOW AT ALL. Each reads a precondition off one
     result and then asserts something about another, and that identity holds only while both cover
     the same set. It stops holding the moment the corpus outgrows one page: measured against a
     production Olog on 2026-09-02, a filtered search saturated at ``_PAGE`` while the reference page
