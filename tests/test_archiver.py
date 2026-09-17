@@ -26,6 +26,7 @@ from epics_mcp.tools.archiver import (
     _is_archived,
     _list_archived_pvs,
 )
+from tests import test_archiver_live
 
 # A valid window for the tests that are about something else (payload shapes, caps, errors).
 # These were "a"/"b" until the client gained a time contract, placeholders that no layer ever
@@ -1542,3 +1543,101 @@ async def test_list_archived_pvs_maps_archiver_error(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("epics_mcp.tools.archiver.ArchiverClient", _Fake)
     with pytest.raises(EpicsConnectionError, match="Archiver:"):
         await _list_archived_pvs()
+
+
+# --- GQ-395: the live probes of tests/test_archiver_live.py, driven offline against a recorded
+# --- transport. The REAL client stays in the path and only the socket is replaced (CLAUDE.md,
+# --- evidence discipline 8); every fake keeps the requested URLs so the address is asserted too.
+
+
+class _IndexedArchiver:
+    """A stand-in appliance that answers by CALL INDEX and records every request.
+
+    The order of a probe's queries is a property of its code, so the fake pins it (first the
+    reference, then the sibling). Answering by the start value would not do here: all three
+    sibling spellings and the reference are normalised to ONE wire string.
+    """
+
+    def __init__(self, answers: list[object]) -> None:
+        self.answers = answers
+        self.urls: list[str] = []
+        self.calls: list[dict[str, str]] = []
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        self.urls.append(url)
+        self.calls.append({str(key): str(value) for key, value in params.items()})
+        return _resp(self.answers[len(self.calls) - 1])
+
+
+def _samples(offsets: tuple[int, ...], base_value: float) -> list[dict[str, object]]:
+    """getData.json samples inside FIXTURE_WINDOW (2026), ``offsets`` minutes past its start."""
+    start = 1767225600  # 2026-01-01T00:00:00Z, FIXTURE_WINDOW[0]
+    return [
+        {
+            "secs": start + 60 * offset,
+            "nanos": 0,
+            "val": base_value + offset,
+            "severity": 0,
+            "status": 0,
+        }
+        for offset in offsets
+    ]
+
+
+def _block(samples: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [{"meta": {"name": "DEV-TEST01:X"}, "data": samples}]
+
+
+_SIBLING_PROBE = test_archiver_live.test_sibling_notations_agree_with_iso_z
+_GETDATA = "http://arch/retrieval/data/getData.json"
+
+
+def test_sibling_probe_goes_red_on_equal_length_with_different_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 4): the sibling probe compared ``len(samples)``, so the same NUMBER of
+    different samples passed. Three reference samples against three others must now be red, and
+    red at the sample comparison: not at the status, cap or inside guards, which would mean the
+    fixture was wrong rather than the answer.
+    """
+    client = ArchiverClient("http://arch")
+    fake = _IndexedArchiver([_block(_samples((0, 1, 2), 1.0)), _block(_samples((0, 1, 5), 100.0))])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError) as raised:
+        _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01 00:00:00")
+
+    message = str(raised.value)
+    assert "did not return the reference's samples" in message
+    for guard in (
+        "status=",
+        "the cap truncated",
+        "positive control not met",
+        "cannot discriminate",
+    ):
+        assert guard not in message, f"the {guard!r} guard fired, not the sample comparison"
+    assert fake.urls == [_GETDATA, _GETDATA]
+
+
+def test_sibling_probe_sends_one_wire_window_and_a_derived_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two halves the green direction pins: both queries carry the SAME ``from`` (the
+    normalisation makes the sibling spelling identical to the reference's), and the sibling's
+    ``to`` is derived from the reference's newest sample plus one second instead of the fixed
+    ``FIXTURE_WINDOW[1]``, which lies in the future and could race against a newly archived sample.
+    """
+    client = ArchiverClient("http://arch")
+    same = _block(_samples((0, 1, 2), 1.0))  # newest sample at +2 min, so the end is 00:02:01
+    fake = _IndexedArchiver([same, same])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    _SIBLING_PROBE(client, "DEV-TEST01:X", "2026-01-01")
+
+    reference, sibling = fake.calls
+    assert reference["from"] == sibling["from"] == "2026-01-01T00:00:00.000Z"
+    assert reference["to"] == "2027-01-01T00:00:00.000Z"
+    assert sibling["to"] == "2026-01-01T00:02:01.000Z"
+    assert fake.urls == [_GETDATA, _GETDATA]

@@ -17,7 +17,7 @@ offline suite was green throughout (it passed "a"/"b" as the window).
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ from epics_mcp.find_moderate_pv import (
     glob_discriminates,
     unmet_extra_premises,
 )
-from epics_mcp.services._time_window import TimeWindowFormatError
+from epics_mcp.services._time_window import TimeWindowFormatError, format_iso_z
 from epics_mcp.services.archiver_client import ArchiverClient, HistoryResult, Sample
 from tests.live_gate import assert_live_available, live_demanded
 
@@ -118,12 +118,25 @@ def test_absolute_window_finds_samples(client: ArchiverClient, pv: str) -> None:
     )
 
 
-# ⚠ These three ARE literals and stay literals: they are three SPELLINGS of the instant
-# FIXTURE_WINDOW[0] denotes, and the subject of the test is precisely that the spellings differ
-# while the instant does not. Deriving them from the constant would delete the test. They are
+def _assert_evaluable(label: str, result: HistoryResult) -> None:
+    """The status and cap guards of the sibling probe, applied to each of its two queries."""
+    assert result["status"] == "ok", (
+        f"{label}: status={result['status']!r}, the history is unknown, not proven empty; "
+        "this comparison is not evaluable"
+    )
+    assert not result["capped"], (
+        f"{label}: the cap truncated the comparison (max_points={_MAX_POINTS}), a difference "
+        "beyond it would be invisible"
+    )
+
+
+# These three ARE literals and stay literals: they are three SPELLINGS of the instant
+# FIXTURE_WINDOW[0] denotes. Deriving them from the constant would delete the test. They are
 # coupled to it by hand, so a change to FIXTURE_WINDOW[0] has to be carried here; the assertion
 # below compares against a reference window that IS derived, so a drift shows up as a mismatch
-# rather than as a silent pass.
+# rather than as a silent pass. What the spellings do NOT do is differ on the wire: the client
+# normalises every one of them, and the reference, to the same zone-explicit ISO string
+# (measured 2026-09-17, GQ-395); the docstring below says what that leaves the probe to pin.
 @pytest.mark.parametrize(
     "start",
     [
@@ -133,36 +146,47 @@ def test_absolute_window_finds_samples(client: ArchiverClient, pv: str) -> None:
     ],
 )
 def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, start: str) -> None:
-    """The differential: every notation denotes the same instant and must give the same answer.
+    """Every notation denotes the same instant and must give the same SAMPLES.
 
     Each of these is an HTTP 500 without the normalization, surfaced, until today, as
     'the Archiver is unreachable'.
 
+    WHAT A GREEN RUN DOES AND DOES NOT SAY, because the client normalises before sending: all
+    three spellings and the reference reach the appliance as ONE wire string
+    (``2026-01-01T00:00:00.000Z``, measured 2026-09-17), so live this probe sends the same
+    request twice per spelling and pins that the appliance answers identical requests with
+    identical samples. THAT the normalisation is what makes them identical is held offline:
+    ``tests/test_archiver.py`` pins the wire value per spelling and drives this probe against a
+    recorded transport, where one driver asserts a single ``from`` on both queries.
+
+    SAMPLES, NOT LENGTHS (GQ-395, S15 row 4). Until 2026-09-17 this compared ``len(samples)``,
+    and the same count of DIFFERENT samples passed. The whole ``Sample`` records are compared.
+
+    THE SIBLING'S END IS DERIVED, NOT ``FIXTURE_WINDOW[1]`` (the GQ-288 repair of the alarm
+    probe: a fixed end cannot race). That end lies in the future, so a sample archived between
+    the two queries would land on one side only and the comparison would go red without a
+    defect. The sibling asks up to the reference's newest sample plus one second (whether the
+    appliance reads ``to`` inclusively is not measured, the second is the margin); the reference
+    keeps ``FIXTURE_WINDOW`` because that window IS the fixture criterion ``find_moderate_pv``
+    shares (GQ-289). What remains is a race of one second: a sample archived inside that margin
+    after the reference query lands on the sibling side only.
+
     The three guards are load-bearing and were missing. Without the reference guard an aged-out
-    window makes this ``0 == 0``, green, and no longer a test. Without the cap guard both sides
+    window makes this ``[] == []``, green, and no longer a test. Without the cap guard both sides
     read as the cap rather than the window. And ``status`` must be ``ok``: the client separates
     ``withheld`` ("the response could not be interpreted") from ``empty`` ("genuinely no samples")
     precisely so a caller cannot read the first as the second, reading only ``["samples"]``
     throws that distinction away and would let an uninterpretable response pass as agreement.
     """
     reference = _history(client, pv, *_window())
-    sibling = _history(client, pv, start, FIXTURE_WINDOW[1])
-
-    for label, result in (("reference", reference), (f"{start!r}", sibling)):
-        assert result["status"] == "ok", (
-            f"{label}: status={result['status']!r}, the history is unknown, not proven empty; "
-            "this comparison is not evaluable"
-        )
-        assert not result["capped"], (
-            f"{label}: the cap truncated the comparison (max_points={_MAX_POINTS}), a difference "
-            "beyond it would be invisible"
-        )
+    _assert_evaluable("reference", reference)
     assert reference["samples"], _NO_REFERENCE
     # "Has samples" is NOT "has samples in the window": the appliance carries the last value from
     # BEFORE the window start into the result. A slow PV therefore answers exactly one (carried)
-    # sample for EVERY start, and the comparison degenerates to 1 == 1, green for any window at
-    # all. Measured across 24 archived PVs: n minus inside == 1 in every case, and 5 of them had
-    # n=1/inside=0. Demand a reference that genuinely spans the window.
+    # sample for EVERY start, and the comparison degenerates to that one carried sample against
+    # itself, green for any window at all. Measured across 24 archived PVs: n minus inside == 1 in
+    # every case, and 5 of them had n=1/inside=0. Demand a reference that genuinely spans the
+    # window.
     inside = _inside_window(reference["samples"], *_window())
     assert inside >= FIXTURE_MIN_INSIDE, (
         f"the reference holds {len(reference['samples'])} sample(s) but only {inside} inside the "
@@ -170,7 +194,16 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
         "discriminate between windows. Pick a PV with several samples in the window "
         "(EPICS_MCP_LIVE_ARCHIVER_PV)."
     )
-    assert len(sibling["samples"]) == len(reference["samples"])
+
+    newest = max(sample["secs"] for sample in reference["samples"])
+    end = format_iso_z(datetime.fromtimestamp(newest + 1, tz=UTC))
+    sibling = _history(client, pv, start, end)
+    _assert_evaluable(f"{start!r}", sibling)
+    assert sibling["samples"] == reference["samples"], (
+        f"{start!r}: the sibling notation did not return the reference's samples "
+        f"({len(sibling['samples'])} against {len(reference['samples'])}); the same count of "
+        "different samples used to pass here"
+    )
 
 
 def test_past_window_returns_nothing(client: ArchiverClient, pv: str) -> None:
