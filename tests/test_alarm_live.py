@@ -146,12 +146,15 @@ def _count(client: AlarmClient, pv: str, start: str, end: str = "now") -> int:
 
 
 #: The two fields an event is identified by in the comparison below, in this order. ``config``
-#: and not ``pv``: ``/search/alarm`` answers state: AND config: documents when no root is given,
-#: and a config: document carries no ``pv`` (the offline fixtures in ``tests/test_alarm.py`` and
-#: ``AlarmClient.get_alarm_history`` both say so), while ``config`` is the schema anchor that
-#: ``_require_alarm_records`` enforces as a string on every document, with the PV name as its
-#: last path segment. ``pv`` stays in the client's projection for the caller's sake, so a reader
-#: can see which PV an event belongs to; it is just not the field this probe identifies by.
+#: and not ``pv``: ``/search/alarm`` answers state: AND config: documents when no root is given
+#: (``AlarmClient.get_alarm_history`` says so), and a config: document can come without ``pv``:
+#: Phoebus' ``AlarmConfigMessage`` has no such field and the logger omits null fields (read in the
+#: Phoebus source, not measured live). The config-index fixture in ``tests/test_alarm.py`` models
+#: it that way; the history fixtures there that give a config: document a ``pv`` are no evidence
+#: either way. ``config`` is the schema anchor that ``_require_alarm_records`` enforces as a
+#: string on every document, with the PV name as its last path segment. ``pv`` stays in the
+#: client's projection for the caller's sake, so a reader can see which PV an event belongs to;
+#: it is just not the field this probe identifies by.
 _IDENTITY_FIELDS = ("message_time", "config")
 
 
@@ -227,20 +230,21 @@ def spellings_of(moment: datetime) -> tuple[str, str]:
 def test_relative_window_finds_events(client: AlarmClient, pv: str) -> None:
     """The baseline, without events the probes below would prove nothing.
 
-    WHAT IT SEES AND WHAT IT DOES NOT, measured offline on 2026-09-17 (GQ-395, S15 row 6) with a
-    recorded transport. A logger that cannot read the amount answers an empty list (class A, the
-    measured behaviour of both services on an unreadable value, see ``_time_window``): this probe
-    goes red, but with the message below, which names an unusable fixture rather than a server,
-    and so does ``test_naive_iso_window_is_honoured`` at its reference guard. A logger that DROPS
-    the amount answers everything (class B): this probe and every other relative query of this
-    module stay green, because each is asserted as "not empty" or derives its window from a page
-    that class B returns in full. The CLIENT half is pinned offline and mutant-proven in
-    ``tests/test_alarm.py``: ``test_get_alarm_history_relative_amount_passes_through`` (since
-    6b013fe, 2026-07-15) and the anchor assertion of
+    WHAT IT SEES AND WHAT IT DOES NOT. Measured offline on 2026-09-17 (GQ-395, S15 row 6) with a
+    recorded transport, for this probe and ``test_naive_iso_window_is_honoured``: a logger that
+    cannot read the amount answers an empty list (class A, the measured behaviour of both services
+    on an unreadable value, see ``_time_window``), and this probe goes red, but with the message
+    below, which names an unusable fixture rather than a server, while the naive-ISO probe goes red
+    at its reference guard. A logger that DROPS the amount answers everything (class B), and both
+    stay green. Read, not measured, for the other relative queries of this module: the positive
+    ones only demand "not empty", and the negative controls are held empty by the pv, root or
+    severity filter, which class B does not drop. The CLIENT half is pinned offline and
+    mutant-proven in ``tests/test_alarm.py``:
+    ``test_get_alarm_history_relative_amount_passes_through`` (since 6b013fe, 2026-07-15) and
     ``test_naive_iso_probe_is_green_while_the_client_normalises`` (since 9dbc097, 2026-09-08) go
     red when the client collapses the amount to *now* or stops sending it. The SERVER half, class
-    B, is an open, unmeasured entry in the opi-foundry workspace roadmap (its evidence folder is
-    ``analysis/gq395-live-test-wachen-2026-09-17`` in the workspace).
+    B, is open and unmeasured against a real logger; the offline evidence lives outside this
+    repository, in the opi-foundry workspace under ``analysis/gq395-live-test-wachen-2026-09-17``.
     """
     assert _count(client, pv, "7 days"), f"no alarm history for {pv!r}: pick a PV that has some"
 

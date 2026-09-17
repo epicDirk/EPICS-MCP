@@ -170,16 +170,16 @@ def test_relative_window_agrees_with_absolute(client: OlogClient) -> None:
     it collapses the window to *now* and answers an empty list (class A, the measured behaviour of
     both services on an unreadable value, see ``_time_window``): this probe goes red at its
     comparison, ``relative`` becomes 0 against a full ``absolute``. A server that DROPS the amount
-    answers everything up to *now* (class B): this probe stays green, and so does every other
-    relative query of this module, because each is asserted as "not empty" or against a side that
-    also returns everything. The CLIENT half is pinned offline and mutant-proven in
-    ``tests/test_olog.py`` (``test_search_logbook_relative_window_not_rewritten_and_sends_no_tz``
-    and ``test_search_logbook_mixed_window_still_sends_tz``, since 41803b9, 2026-07-15): they go
-    red when the client collapses the amount to *now* or stops sending it. The SERVER half, class
-    B, is an open, unmeasured entry in the opi-foundry workspace roadmap (its evidence folder is
-    ``analysis/gq395-live-test-wachen-2026-09-17`` in the workspace); a mixed window, relative
-    start with a data-derived absolute end, would see it and rests on server properties nobody
-    has measured. The boundary of an ABSOLUTE window is pinned by
+    answers everything up to *now* (class B): this probe stays green. Read, not measured: the only
+    other relative amount in this module ("1 year") is refused before a request is sent. The
+    CLIENT half is pinned offline and mutant-proven in ``tests/test_olog.py``
+    (``test_search_logbook_relative_window_not_rewritten_and_sends_no_tz`` and
+    ``test_search_logbook_mixed_window_still_sends_tz``, since 41803b9, 2026-07-15): they go red
+    when the client collapses the amount to *now* or stops sending it. The SERVER half, class B,
+    is open and unmeasured against a real server; the offline evidence lives outside this
+    repository, in the opi-foundry workspace under ``analysis/gq395-live-test-wachen-2026-09-17``.
+    A mixed window, relative start with a data-derived absolute end, would see it and rests on
+    server properties nobody has measured. The boundary of an ABSOLUTE window is pinned by
     test_narrow_window_discriminates; that is where a dropped absolute window goes red, and it
     says nothing about a dropped relative amount.
     """
