@@ -261,7 +261,7 @@ def unmet_extra_premises(client: ArchiverClient, pv_name: str) -> list[str]:
 
 
 def glob_discriminates(client: ArchiverClient, glob: str) -> bool:
-    """Whether *glob* really filters ``getAllPVs``, the premise the printed recipe depends on.
+    """Whether ``getAllPVs`` answers *glob* differently from no filter, the recipe's premise.
 
     The fifth gap, and it was not in the original report of this defect: the walk PRINTS a glob
     into its fixture recipe and never checks it, while the live suite hangs two assertions on it.
@@ -277,7 +277,9 @@ def glob_discriminates(client: ArchiverClient, glob: str) -> bool:
     closed: the live probe now calls THIS function for the contrast behind the refusal, and
     ``test_the_search_verifies_the_glob_this_suite_needs`` calls it for the recipe premise. One
     function carries the measurement, same endpoint, with and without the glob; two probes carry
-    two claims, so a green run of either is a statement about ``getAllPVs`` honouring ``pv``.
+    two claims, so a green run of either says that ``getAllPVs`` answers the glob differently from
+    no filter. That is weaker than "honours ``pv``": a filter that blocks everything, or answers
+    other names, differs too and passes here.
     """
     unfiltered = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5"})
     by_name = client._get(f"{client.base_url}/mgmt/bpl/getAllPVs", {"limit": "5", "pv": glob})

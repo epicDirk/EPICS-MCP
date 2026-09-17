@@ -1702,7 +1702,8 @@ def test_this_appliance_probe_is_green_when_only_getallpvs_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The positive direction of the same probe: getPVsForThisAppliance ignores ``pv`` (the
-    refusal's premise) while getAllPVs honours it (the refusal's contrast), and the probe passes.
+    refusal's premise) while getAllPVs answers it differently from no filter (the refusal's
+    contrast), and the probe passes.
     """
     monkeypatch.setenv("EPICS_MCP_LIVE_ARCHIVER_GLOB", "DEV-TEST01:*")
     client = ArchiverClient("http://arch")

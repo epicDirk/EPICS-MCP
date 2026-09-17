@@ -135,8 +135,8 @@ def _assert_evaluable(label: str, result: HistoryResult) -> None:
 # coupled to it by hand, so a change to FIXTURE_WINDOW[0] has to be carried here; the assertion
 # below compares against a reference window that IS derived, so a drift shows up as a mismatch
 # rather than as a silent pass. What the spellings do NOT do is differ on the wire: the client
-# normalises every one of them, and the reference, to the same zone-explicit ISO string
-# (measured 2026-09-17, GQ-395); the docstring below says what that leaves the probe to pin.
+# normalises every one of them, and the reference's start, to the same zone-explicit ISO ``from``
+# string (measured 2026-09-17, GQ-395); the docstring below says what that leaves the probe to pin.
 @pytest.mark.parametrize(
     "start",
     [
@@ -148,28 +148,30 @@ def _assert_evaluable(label: str, result: HistoryResult) -> None:
 def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, start: str) -> None:
     """Every notation denotes the same instant and must give the same SAMPLES.
 
-    Each of these is an HTTP 500 without the normalization, surfaced, until today, as
+    Each of these is an HTTP 500 without the normalization, surfaced, until 2026-07-15, as
     'the Archiver is unreachable'.
 
     WHAT A GREEN RUN DOES AND DOES NOT SAY, because the client normalises before sending: all
-    three spellings and the reference reach the appliance as ONE wire string
-    (``2026-01-01T00:00:00.000Z``, measured 2026-09-17), so live this probe sends the same
-    request twice per spelling and pins that the appliance answers identical requests with
-    identical samples. THAT the normalisation is what makes them identical is held offline:
-    ``tests/test_archiver.py`` pins the wire value per spelling and drives this probe against a
-    recorded transport, where one driver asserts a single ``from`` on both queries.
+    three spellings and the reference's start reach the appliance as ONE ``from`` string
+    (``2026-01-01T00:00:00.000Z``, measured 2026-09-17). The two queries are still not one
+    request: the reference asks up to ``FIXTURE_WINDOW[1]``, the sibling up to a derived end
+    (below). So live this probe pins that the appliance answers the fixture window, and the window
+    closed one second after the reference's newest sample, with identical samples. THAT the
+    normalisation is what makes the spellings identical is held offline: ``tests/test_archiver.py``
+    pins the wire value per spelling and drives this probe against a recorded transport, where one
+    driver asserts a single ``from`` on both queries and the derived ``to``.
 
     SAMPLES, NOT LENGTHS (GQ-395, S15 row 4). Until 2026-09-17 this compared ``len(samples)``,
     and the same count of DIFFERENT samples passed. The whole ``Sample`` records are compared.
 
     THE SIBLING'S END IS DERIVED, NOT ``FIXTURE_WINDOW[1]`` (the GQ-288 repair of the alarm
-    probe: a fixed end cannot race). That end lies in the future, so a sample archived between
-    the two queries would land on one side only and the comparison would go red without a
-    defect. The sibling asks up to the reference's newest sample plus one second (whether the
-    appliance reads ``to`` inclusively is not measured, the second is the margin); the reference
-    keeps ``FIXTURE_WINDOW`` because that window IS the fixture criterion ``find_moderate_pv``
-    shares (GQ-289). What remains is a race of one second: a sample archived inside that margin
-    after the reference query lands on the sibling side only.
+    probe: a fixed end in the PAST cannot race). ``FIXTURE_WINDOW[1]`` lies in the future, so a
+    sample archived between the two queries would land on one side only and the comparison would
+    go red without a defect. The sibling asks up to the reference's newest sample plus one second
+    (whether the appliance reads ``to`` inclusively is not measured, the second is the margin); the
+    reference keeps ``FIXTURE_WINDOW`` because that window IS the fixture criterion
+    ``find_moderate_pv`` shares (GQ-289). What remains is a race of one second: a sample archived
+    inside that margin after the reference query lands on the sibling side only.
 
     The three guards are load-bearing and were missing. Without the reference guard an aged-out
     window makes this ``[] == []``, green, and no longer a test. Without the cap guard both sides
@@ -184,9 +186,9 @@ def test_sibling_notations_agree_with_iso_z(client: ArchiverClient, pv: str, sta
     # "Has samples" is NOT "has samples in the window": the appliance carries the last value from
     # BEFORE the window start into the result. A slow PV therefore answers exactly one (carried)
     # sample for EVERY start, and the comparison degenerates to that one carried sample against
-    # itself, green for any window at all. Measured across 24 archived PVs: n minus inside == 1 in
-    # every case, and 5 of them had n=1/inside=0. Demand a reference that genuinely spans the
-    # window.
+    # itself, green for any window at all. Measured for 84018ec (2026-07-16) across 24 archived
+    # PVs: n minus inside == 1 in every case, and 5 of them had n=1/inside=0. Demand a reference
+    # that genuinely spans the window.
     inside = _inside_window(reference["samples"], *_window())
     assert inside >= FIXTURE_MIN_INSIDE, (
         f"the reference holds {len(reference['samples'])} sample(s) but only {inside} inside the "
@@ -250,9 +252,11 @@ def test_this_appliance_endpoint_still_has_no_name_filter(client: ArchiverClient
         "getPVsForThisAppliance now honours a pv filter, the list_archived_pvs refusal is no "
         "longer needed and should be replaced by forwarding the glob"
     )
-    # The sibling endpoint DOES filter, and that contrast is what makes the refusal (rather than a
-    # blanket 'no filtering here') the right call. Measured on ONE endpoint, getAllPVs with and
-    # without the glob, through the predicate the fixture search uses. Until GQ-395 (2026-09-17)
+    # The sibling endpoint answers the glob differently from no filter, and that contrast is what
+    # makes the refusal (rather than a blanket 'no filtering here') the right call. Measured on ONE
+    # endpoint, getAllPVs with and without the glob, through the predicate the fixture search uses;
+    # a filter that blocks everything, or answers other names, differs too and stays green here.
+    # The failure message below keeps its wording on purpose. Until GQ-395 (2026-09-17)
     # this compared getAllPVs-with-glob against getPVsForThisAppliance, two endpoints that answer
     # different lists on a cluster whatever the filter does, so it held when BOTH ignored the
     # filter (S15 row 7). One measurement, one place: glob_discriminates is the definition; this
