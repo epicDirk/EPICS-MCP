@@ -8,6 +8,7 @@ import requests
 
 from epics_mcp.config import EpicsConfig
 from epics_mcp.errors import EpicsConnectionError, EpicsError
+from epics_mcp.services import olog_client
 from epics_mcp.services._time_window import TimeWindowFormatError
 from epics_mcp.services.olog_client import (
     HIT_COUNT_CEILING,
@@ -28,6 +29,7 @@ from epics_mcp.tools.olog import (
     _list_tags,
     _search_logbook,
 )
+from tests import test_olog_live
 
 # A raw Olog entry with values in every field a server can send (owner, source, free text,
 # logbook owner, attachment filename, property value), the fixture for the whole-entry pins.
@@ -1494,3 +1496,122 @@ async def test_unreadable_levels_lookup_says_so_and_keeps_the_result(
     note = result["note"]
     assert isinstance(note, str)
     assert "Could not verify" in note
+
+
+# --- GQ-395: the live probes of tests/test_olog_live.py, driven offline against a recorded
+# --- transport. The REAL client stays in the path and only the socket is replaced (CLAUDE.md,
+# --- evidence discipline 8); every fake keeps the requested URLs so the address is asserted too.
+
+
+class _IndexedOlog:
+    """A stand-in Olog that answers by CALL INDEX and records every request.
+
+    Answering by the start value would not do: both notations of the two-notation probe are
+    normalised to ONE wire string, so only the ORDER of the probe's queries (a property of its
+    code, which the fake pins) tells its four searches apart.
+    """
+
+    def __init__(self, answers: list[object]) -> None:
+        self.answers = answers
+        self.urls: list[str] = []
+        self.calls: list[dict[str, str]] = []
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        self.urls.append(url)
+        self.calls.append({str(key): str(value) for key, value in params.items()})
+        return _resp(self.answers[len(self.calls) - 1])
+
+
+class _NotationSensitiveOlog(_IndexedOlog):
+    """An Olog that cannot read ISO-8601: a ``start`` carrying a ``T`` degrades to *now* and is
+    answered with a well-formed EMPTY page, which is the measured behaviour this module's live
+    probes exist for. Every other query is answered by call index."""
+
+    def __call__(self, url: str, **kwargs: object) -> Mock:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        if "T" in str(params.get("start", "")):
+            self.urls.append(url)
+            self.calls.append({str(key): str(value) for key, value in params.items()})
+            return _resp({"logs": [], "hitCount": 0})
+        return super().__call__(url, **kwargs)
+
+
+def _entries(ids: tuple[int, ...]) -> list[dict[str, object]]:
+    """Search entries one second apart, newest first, with the fields the probe reads."""
+    return [
+        {"id": i, "createdDate": 1_757_000_000_000 + i * 1000, "level": "Info", "title": f"t{i}"}
+        for i in ids
+    ]
+
+
+def _search(entries: list[dict[str, object]]) -> dict[str, object]:
+    return {"logs": entries, "hitCount": len(entries)}
+
+
+_NOTATION_PROBE = test_olog_live.test_iso_and_wall_clock_windows_agree
+_SEARCH_URL = "http://olog/logs/search"
+
+
+def test_iso_and_wall_probe_goes_red_on_equal_counts_with_different_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 3): the two-notation probe compared ``hitCount``, so the same NUMBER of
+    different entries passed (and on a production Olog that number is a ceiling). The probe's
+    four searches are the sample page, the bounded window, the ISO query and the wall-clock
+    query; the last one answers three OTHER ids with the same count and must be red at the
+    identity comparison, not at the reference guard.
+    """
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    fake = _IndexedOlog([_search(page), _search(page), _search(page), _search(_entries((6, 5, 4)))])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    with pytest.raises(AssertionError, match="different identities") as raised:
+        _NOTATION_PROBE(client)
+
+    assert "positive control not met" not in str(raised.value), "the reference guard fired"
+    assert fake.urls == [_SEARCH_URL] * 4
+
+
+def test_iso_and_wall_probe_sends_one_wire_window_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direction one: with the normalisation in place the ISO and the wall-clock query carry the
+    SAME ``start``, ``end`` and ``tz``, and both ask for the bounded page (``_PAGE`` plus the
+    over-fetch of one). That identity is why the live run is green, and it is asserted rather
+    than assumed."""
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    fake = _IndexedOlog([_search(page)] * 4)
+    monkeypatch.setattr(client.session, "get", fake)
+
+    _NOTATION_PROBE(client)
+
+    sample, window, iso, wall = fake.calls
+    assert "start" not in sample, "the sample page is unbounded by design"
+    assert window["size"] == iso["size"] == wall["size"] == str(test_olog_live._PAGE + 1)
+    assert (iso["start"], iso["end"], iso["tz"]) == (wall["start"], wall["end"], wall["tz"])
+    assert iso["tz"] == "UTC"
+    assert fake.urls == [_SEARCH_URL] * 4
+
+
+def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direction two: THE regression, reproduced. Without the normalisation the ISO form reaches
+    an Olog raw, the server takes it as *now* and answers empty. The probe goes red at its
+    REFERENCE guard, because the bounded window itself is derived through an ISO query, which is
+    the first query that needs the normalisation; the wall-clock query never runs."""
+    client = OlogClient("http://olog")
+    page = _entries((3, 2, 1))
+    fake = _NotationSensitiveOlog([_search(page)] * 4)
+    monkeypatch.setattr(client.session, "get", fake)
+    monkeypatch.setattr(olog_client, "normalize_olog_time", lambda value, *, param: (value, True))
+
+    with pytest.raises(AssertionError, match="positive control not met"):
+        _NOTATION_PROBE(client)
+
+    assert len(fake.calls) == 2, "the window query is the second and last query"
+    assert "T" in fake.calls[1]["start"], "the ISO form was expected to reach the server raw"
+    assert fake.urls == [_SEARCH_URL] * 2

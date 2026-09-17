@@ -13,8 +13,9 @@ execution settled it.
 
 The assertions are DIFFERENTIAL: the same window expressed several ways must give the same answer:
 rather than exact counts, so they hold against any Olog with any data. A run is reproducible because
-no window is left to the CLOCK: the older probes use fixed constants and the ones that need a corpus
-bounded to one page derive their window from the DATA (:func:`_page_bounded_window`). The single
+no window is left to the CLOCK: the older probes use fixed constants, and the ones that need a
+corpus bounded to one page, or two queries over the SAME set, derive their window from the DATA
+(:func:`_page_bounded_window`). The single
 exception is deliberate and says so in its own docstring: the relative amount in
 ``test_relative_window_agrees_with_absolute``, which the server resolves against now, and which
 exists to pin that such an amount PARSES at all.
@@ -49,9 +50,8 @@ def _require_live_stack() -> None:
     )
 
 
-# A window wide enough to contain any sandbox entry, expressed two ways. Fixed, not clock-derived.
+# A window wide enough to contain any sandbox entry. Fixed, not clock-derived.
 _WIDE_ISO = ("2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
-_WIDE_WALL = ("2020-01-01 00:00:00.000", "2030-01-01 00:00:00.000")
 # A window that predates any sandbox entry: the negative control.
 _PAST = ("2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z")
 
@@ -87,20 +87,70 @@ def test_iso_window_is_honoured(client: OlogClient) -> None:
     assert total, "an ISO window spanning 2020-2030 returned nothing, the window is being dropped"
 
 
-def test_iso_and_wall_clock_windows_agree(client: OlogClient) -> None:
-    """The decisive differential: the same window in two notations must give the same answer.
+def _wall_clock_of(iso_z: str) -> str:
+    """The wall-clock spelling ``yyyy-MM-dd HH:mm:ss.000`` of an ISO-Z instant on whole seconds.
 
-    Stronger than 'ISO returns something', it pins that ISO is honoured FAITHFULLY, not merely
-    that the request survives.
-
-    The guard is load-bearing: ``_hits`` returns ``int | None``, so without it this was green both
-    on an empty logbook (``0 == 0``) and on an unreadable count (``None == None``), two very
-    different facts, neither of them "the notations agree".
+    Cut from the ISO-Z string the derived window carries, never built from the clock. A naive
+    wall-clock value is read as UTC by the shared classifier, so both spellings name one instant.
     """
-    iso, wall = _hits(client, *_WIDE_ISO), _hits(client, *_WIDE_WALL)
+    return iso_z.replace("T", " ").removesuffix("Z") + ".000"
+
+
+#: Why the two-notation probe could not run: no window that fits one page. Its own text, because
+#: _NO_WINDOW and _NO_TITLE_WINDOW speak of level arithmetic and title words this probe never asks
+#: for. It covers the WINDOW failing only; an empty answer inside a found window stays loud.
+_NO_NOTATION_WINDOW = (
+    "no time window found that fits one page; the two notations have to be compared over the SAME "
+    "bounded set, and a fixture that cannot supply one says nothing about whether they agree"
+)
+
+
+def test_iso_and_wall_clock_windows_agree(client: OlogClient) -> None:
+    """One window in two notations must return the same ENTRIES inside one bounded window.
+
+    WHAT A GREEN RUN DOES AND DOES NOT SAY, because the client normalises before sending: both
+    notations reach Olog as ONE wire string (``yyyy-MM-dd HH:mm:ss.SSS`` plus ``tz=UTC``, measured
+    2026-09-17), so live this probe sends the same bounded request twice and pins that a server
+    answers identical requests with identical entries, and that the window fits one page. THAT
+    the normalisation is what makes the notations identical is held offline by
+    ``tests/test_olog.py``, which drives this probe against a recorded transport in both
+    directions: with the normalisation in place the two requests carry one window; with it taken
+    out the ISO form goes out raw, which an Olog does not read, and the probe goes red. The name
+    is kept for the anchors that point at it (S15 row 3); it promises more than the wire carries.
+
+    IDENTITIES, NOT ``hitCount``, INSIDE ONE BOUNDED WINDOW (GQ-395, S15 row 3). Until 2026-09-17
+    this compared the ``hitCount`` of an unbounded 2020-2030 window in the two notations. On a
+    production Olog that number is an Elasticsearch ceiling at ``HIT_COUNT_CEILING``, not a count,
+    and even below the ceiling a server answering the same NUMBER of different entries stayed
+    green. The window comes from :func:`_page_bounded_window` (derived from the data, never the
+    clock, this module's standing promise), both queries carry it, ``capped`` is demanded false on
+    both, and the entry ids are compared.
+
+    The skip covers the window failing only. An EMPTY answer to a window whose corpus is not
+    empty is this module's own failure class and stays a loud reference failure, as in the title
+    probe below.
+    """
+    bounded = _page_bounded_window(client, min(_WINDOW_LADDER))
+    if bounded is None:
+        pytest.skip(_NO_NOTATION_WINDOW)
+    start, end, whole = bounded
+    assert whole, _NO_REFERENCE
+
+    def identities(start_spelling: str, end_spelling: str) -> list[str]:
+        page, capped, _total = client.search_logbook(
+            start=start_spelling, end=end_spelling, size=_PAGE, sort="down"
+        )
+        assert not capped, "a notation query outgrew the page inside the window; window is unsound"
+        return sorted(str(entry["id"]) for entry in page)
+
+    iso = identities(start, end)
+    wall = identities(_wall_clock_of(start), _wall_clock_of(end))
     assert iso, _NO_REFERENCE
-    assert wall is not None, _NO_REFERENCE
-    assert iso == wall
+    assert iso == wall, (
+        f"the two notations returned different identities inside one bounded window "
+        f"({len(iso)} against {len(wall)} entries); a server that answers one window with "
+        "different entries is not honouring it"
+    )
 
 
 def test_relative_window_agrees_with_absolute(client: OlogClient) -> None:
@@ -514,8 +564,9 @@ def test_title_filter_is_honoured_and_matches_whole_words(client: OlogClient) ->
     # becomes a SKIP: this assertion is therefore neither the same control nor a stronger one, and
     # it cannot be, because it runs after that decision. What it does catch is a window the server
     # degraded to empty while the corpus is not, which is this file's own failure class. The old
-    # case stays covered module-wide: ten other probes assert _NO_REFERENCE on an unbounded read,
-    # so an Olog nobody can reach still turns this module red.
+    # case stays covered module-wide: eight other assertions in six probes demand _NO_REFERENCE
+    # on an unbounded read (counted 2026-09-17, after the two-notation probe became bounded), so
+    # an Olog nobody can reach still turns this module red.
     assert whole, _NO_REFERENCE
     titles = [str(entry["title"]) for entry in whole if isinstance(entry.get("title"), str)]
     if not titles:
