@@ -898,3 +898,74 @@ def test_naive_iso_probe_refuses_an_event_without_identity(
     assert "positive control not met" not in message, "the reference guard fired, not the identity"
     assert "the cap truncated" not in message, "the cap guard fired, not the identity"
     assert logger.urls == ["http://alarm/search/alarm"] * 3
+
+
+def _config_event(config: str, message_time: str = "2026-08-25T09:44:01.000Z") -> dict[str, object]:
+    """One event as a ``config:`` document can come back from ``/search/alarm``: no ``pv``."""
+    return {"config": config, "message_time": message_time}
+
+
+def test_naive_iso_probe_goes_red_on_equal_times_with_different_configs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GQ-395 (S15 row 1), the ``config`` half of the identity: one event per window at the SAME
+    time but for a DIFFERENT config must be red at the comparison. An identity reduced to the time,
+    or one that checks ``config`` without comparing it, would let the same number of wrong events
+    pass again, which is the class the row was opened for.
+    """
+    client = AlarmClient("http://alarm")
+    logger = _IndexedLogger(
+        [
+            _ALARM_PAGE,
+            [_config_event("config:/Accelerator/DEV/A0")],
+            [_config_event("config:/Accelerator/DEV/A1")],
+        ]
+    )
+    monkeypatch.setattr(client.session, "get", logger)
+
+    with pytest.raises(AssertionError) as raised:
+        test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    message = str(raised.value)
+    for guard in ("lacks a usable", "positive control not met", "the cap truncated"):
+        assert guard not in message, f"the {guard!r} guard fired, not the comparison"
+    assert logger.urls == ["http://alarm/search/alarm"] * 3
+
+
+def test_naive_iso_probe_is_green_on_config_documents_without_pv_in_any_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The green direction of the same identity. ``/search/alarm`` answers config: documents too,
+    and those can come without ``pv`` (Phoebus' ``AlarmConfigMessage`` has no such field, read in
+    the source), so an identity built on ``pv`` would be red here without a defect. The server's
+    order is not part of the claim either: the same two events in the opposite order must compare
+    equal.
+    """
+    client = AlarmClient("http://alarm")
+    first = _config_event("config:/Accelerator/DEV/A0", "2026-08-25T09:44:01.000Z")
+    second = _config_event("config:/Accelerator/DEV/A1", "2026-08-25T09:44:02.000Z")
+    logger = _IndexedLogger([_ALARM_PAGE, [first, second], [second, first]])
+    monkeypatch.setattr(client.session, "get", logger)
+
+    test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    assert logger.urls == ["http://alarm/search/alarm"] * 3
+
+
+def test_naive_iso_probe_refuses_an_empty_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_require_alarm_records`` admits an empty ``config`` string, and two such events at the
+    same time would compare equal whatever they stood for. The identity refuses the empty string by
+    the field's name, and not at the reference or the cap guard.
+    """
+    client = AlarmClient("http://alarm")
+    empty = _config_event("")
+    logger = _IndexedLogger([_ALARM_PAGE, [empty], [empty]])
+    monkeypatch.setattr(client.session, "get", logger)
+
+    with pytest.raises(AssertionError, match="usable 'config'") as raised:
+        test_alarm_live.test_naive_iso_window_is_honoured(client, "A")
+
+    message = str(raised.value)
+    assert "positive control not met" not in message, "the reference guard fired, not the identity"
+    assert "the cap truncated" not in message, "the cap guard fired, not the identity"
+    assert logger.urls == ["http://alarm/search/alarm"] * 3
