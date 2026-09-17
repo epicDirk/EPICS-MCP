@@ -1,5 +1,6 @@
 """Offline tests for the Phoebus Olog client + tools (no network)."""
 
+from collections.abc import Callable
 from typing import Any, ClassVar
 from unittest.mock import Mock
 
@@ -1615,3 +1616,48 @@ def test_iso_and_wall_probe_goes_red_when_the_normalisation_is_removed(
     assert len(fake.calls) == 2, "the window query is the second and last query"
     assert "T" in fake.calls[1]["start"], "the ISO form was expected to reach the server raw"
     assert fake.urls == [_SEARCH_URL] * 2
+
+
+def _outcome_of(probe_call: Callable[[], None]) -> BaseException | None:
+    """CAPTURE a probe's outcome instead of letting it propagate: a propagated ``Skipped`` would
+    turn THIS test into a skip, and the driver would vanish exactly as silently as the vacuous
+    pass it guards against (the house form of ``tests/test_live_gate.py``). ``None`` = the probe
+    passed."""
+    try:
+        probe_call()
+    except BaseException as exc:  # noqa: BLE001 (Skipped inherits from BaseException)
+        return exc
+    return None
+
+
+_TAG_ANCHOR = test_olog_live.test_tags_listing_satisfies_the_strict_schema
+_TAGS_URL = "http://olog/tags"
+
+
+def test_tag_anchor_skips_instead_of_passing_vacuously_on_an_empty_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F3 (GQ-395): the tag schema anchor asserted ``all(...)`` over the listing, so an EMPTY
+    listing passed as if it had pinned something. It is a skip now, with the reason printed, and
+    the address the listing came from is asserted as well (evidence discipline 8 names exactly
+    ``list_tags`` at the wrong URL as the measured example).
+    """
+    client = OlogClient("http://olog")
+    fake = _IndexedOlog([[]])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    outcome = _outcome_of(lambda: _TAG_ANCHOR(client))
+
+    assert isinstance(outcome, pytest.skip.Exception), f"expected Skipped, got {outcome!r}"
+    assert "the tag listing is empty" in str(outcome)
+    assert fake.urls == [_TAGS_URL]
+
+
+def test_tag_anchor_passes_on_a_readable_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The positive direction: a listing with one readable tag pins the schema and passes."""
+    client = OlogClient("http://olog")
+    fake = _IndexedOlog([[{"name": "alarm", "state": "Active"}]])
+    monkeypatch.setattr(client.session, "get", fake)
+
+    assert _outcome_of(lambda: _TAG_ANCHOR(client)) is None
+    assert fake.urls == [_TAGS_URL]

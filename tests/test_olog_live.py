@@ -253,10 +253,12 @@ def test_unreadable_sort_silently_reverses_on_the_server(client: OlogClient) -> 
 
 
 def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
-    """S11 anchor: the strict response schema (search wrapper, entries carry ``id``, listings
-    carry ``name``) was DERIVED from this live payload (measured 2026-07-16, Olog 6.x). This pins
-    the premise so it goes red if a server stops matching, the schema is then re-MEASURED, never
-    loosened blindly. A mock cannot carry this burden: it only ever knows what we assumed."""
+    """S11 anchor: the strict response schema (search wrapper, entries carry ``id``, the logbook
+    listing carries ``name``) was DERIVED from this live payload (measured 2026-07-16, Olog 6.x).
+    This pins the premise so it goes red if a server stops matching, the schema is then
+    re-MEASURED, never loosened blindly. A mock cannot carry this burden: it only ever knows what
+    we assumed. The tag listing has its own anchor below since GQ-395: here it was asserted with
+    ``all(...)`` over a possibly empty list and passed vacuously."""
     entries, _capped, total = client.search_logbook(start=_WIDE_ISO[0], end=_WIDE_ISO[1], size=5)
     assert entries, _NO_REFERENCE
     assert all("id" in entry for entry in entries)  # the measured anchor field
@@ -265,7 +267,36 @@ def test_live_payloads_satisfy_the_strict_schema(client: OlogClient) -> None:
     assert fetched is not None and "id" in fetched
     logbooks = client.list_logbooks()
     assert logbooks and all(isinstance(name, str) and name for name in logbooks)
+
+
+#: Why the tag anchor pinned nothing: the listing is empty. Not "a fresh Olog": a stock Olog seeds
+#: the tag "alarm" from default_tags.json on EVERY start with elasticsearch.create.indices=true
+#: (its default), provided the tag's document is absent. So an empty listing means one of three
+#: things, measured in the Olog sources on 2026-09-17: create.indices=false, default.tags.url
+#: naming another list, or the default tags deleted, which only sets state=Inactive (the document
+#: stays, so a restart never re-creates it, and the listing filters on Active).
+_NO_TAGS = (
+    "the tag listing is empty, so the tag schema anchor pins nothing here: this Olog runs with "
+    "create.indices=false, or default.tags.url names another list, or its default tags were "
+    "deleted (a delete only sets state=Inactive, and a restart never re-creates an existing "
+    "document)"
+)
+
+
+def test_tags_listing_satisfies_the_strict_schema(client: OlogClient) -> None:
+    """S11 anchor for ``GET /tags`` (F3, GQ-395): the listing is a list of non-empty names.
+
+    Split out of ``test_live_payloads_satisfy_the_strict_schema`` on 2026-09-17: there the
+    assertion ran ``all(...)`` over a possibly EMPTY list and passed vacuously, so an empty
+    listing looked exactly like a pinned one. An empty listing is a SKIP with the reasons above:
+    decision JB keeps a skip inside a running probe, one that reports the DATA cannot
+    discriminate, a skip, because it is not a missing prerequisite (``EPICS_MCP_REQUIRE_LIVE``
+    acts only through ``assert_live_available``); a demanded run passes ``-rsfE`` so the reason
+    is printed. Unreadable listings stay loud through ``_named_list`` (S11).
+    """
     tags = client.list_tags()
+    if not tags:
+        pytest.skip(_NO_TAGS)
     assert all(isinstance(name, str) and name for name in tags)
 
 
