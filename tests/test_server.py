@@ -3337,9 +3337,10 @@ async def test_stripped_tool_still_returns_structured_content(
 # reaches the agent; on the host measured at the client on 2026-08-30 it does not, the host drops
 # the outputSchema, and since GQ-224 its prose is stripped from the listing too. The guard is now a
 # SOFT catastrophe-ceiling: it no longer bounds each tool's growth, only trips on an extreme
-# accidental blow-up. It stays RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-13
-# after GQ-224: the core lane is 76_740 and the full lane 90_825 (the docstring below splits the
-# steps). Measured 2026-09-05 after GQ-297 it was 78_361 / 92_446, +974 each against the pair
+# accidental blow-up. It stays RELATIONAL (a ``<=`` check) so both lanes pass. Measured 2026-09-21
+# after GQ-459: the core lane is 77_122 and the full lane 91_207 (the docstring below splits the
+# steps). Measured 2026-09-13 after GQ-224 it was 76_740 / 90_825. Measured 2026-09-05 after
+# GQ-297 it was 78_361 / 92_446, +974 each against the pair
 # before it. That GQ-297 figure was measured THREE times, and the last of those was the one recorded
 # then, which is the whole reason this comment says
 # "ANY change that can reach the wire" rather than "any code change": the post-build QA replaced
@@ -3393,9 +3394,16 @@ _TOOLS_LIST_WIRE_CEILING = 200_000
 @pytest.mark.asyncio
 async def test_tools_list_within_budget() -> None:
     """Size-gate: the wire tools/list payload must stay within the agreed ceiling. Standalone
-    FastMCP's native-lean schemas plus the S29 typing keep the core lane 76_740 and the full lane
-    90_825, re-measured 2026-09-13 on both lanes with the display-gated tools excluded for the core
+    FastMCP's native-lean schemas plus the S29 typing keep the core lane 77_122 and the full lane
+    91_207, re-measured 2026-09-21 on both lanes with the display-gated tools excluded for the core
     one, since a lane estimated rather than measured is the error the constant's comment records.
+    GQ-459 added +382 / +382, all of it description text on ``is_alarm_configured``, which is core,
+    hence the identical delta: the sentence that named the config-import precondition as the only
+    thing a miss depends on became the paragraph that names all of them. The delta was not taken
+    from the difference of the two lanes but DERIVED independently and then compared: the tool's
+    docstring under ``inspect.cleandoc``, JSON-encoded, grew by exactly 382 between ``1926a84``
+    and the build. The two figures agreeing is what rules out drift accumulated since 2026-09-13,
+    which a bare subtraction would have folded into this ticket's delta unnoticed.
     GQ-224 moved both lanes in two steps, from 78_361 / 92_446. First -1 / -1: the
     ``find_channels`` sentence that sent a caller to the advertised output schema, which the host
     measurably does not deliver, now names ``enabled`` and ``reach`` as present on every path

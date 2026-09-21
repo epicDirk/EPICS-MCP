@@ -403,15 +403,60 @@ async def test_is_alarm_configured_true_carries_no_miss_caveat(
     assert result.get("note") is None, "a hit proves the PV is configured; it needs no caveat"
 
 
-# --- GQ-459: no shipped page may name the import as the ONLY thing a miss depends on -------------
+# --- GQ-459: a miss has several causes, and every page that qualifies one must name them ---------
 # The repo used to carry one precondition, "the Alarm Logger was running at config-import time",
 # and to present it as the whole of it. Measured at the source: a change document is equally
 # absent for a config that was never CHANGED since import, and the purge component deletes whole
 # indices when it is switched on. Naming one cause as the only one certifies the No it means to
-# qualify, which is why this is a guard and not a one-off edit. Mentioning the import as ONE
-# cause stays allowed; claiming it is the only one does not.
+# qualify, which is why this is a guard and not a one-off edit.
+#
+# TWO guards, because one of them can only do half the job.
+#
+# The POSITIVE one is the load-bearing half: each page that explains what a miss is worth must
+# name at least two causes. That cannot be dodged by rewording, because it asks for content.
+# The NEGATIVE one catches the two historical wordings coming back. ⚠ It is a WORDING guard and
+# nothing more, and this comment says so rather than letting the test name imply otherwise: the
+# claim survives a swapped clause order ("only if the tree was imported while the logger was
+# running"), a synonym for "running" outside its small word field, and a full stop between the
+# two halves. A regex cannot hold "names one cause as the only one"; the positive guard is what
+# holds that, from the other side.
 
-_ONLY_AT_IMPORT = re.compile(r"only\b[^.]{0,140}\brunning\b[^.]{0,140}\bimport", re.IGNORECASE)
+_LOGGER_UP = r"(?:running|up|live|active|started)"
+# Both clause orders, because either reads naturally: only ... running ... import, and
+# only ... import ... running. Bounded by the sentence (``[^.]``) so a match cannot span one.
+# ⚠ The sentence must also mention the LOGGER. Without that conjunct, measured on this tree, the
+# widened word field fired on cli_common.py, on a sentence about registering display tools "only
+# when the ENGINE imports, keep the core server UP": three words of the pattern, nothing to do
+# with alarms. "import" is overloaded in a Python tree, so the alarm context is what makes the
+# guard about its subject rather than about three common words.
+_GAP = r"[^.]{0,140}"
+_ONLY_AT_IMPORT = re.compile(
+    "|".join(
+        rf"only\b{_GAP}" + rf"\b{_GAP}".join(order)
+        for order in (
+            (r"logger", _LOGGER_UP, r"import"),
+            (r"logger", r"import(?:ed)?", _LOGGER_UP),
+            (r"import(?:ed)?", r"logger", _LOGGER_UP),
+        )
+    ),
+    re.IGNORECASE,
+)
+# The causes a page must name at least two of, each by a phrase that cannot be confused with the
+# others. "aged out" and "purge" are one cause (the document is gone), spelled two ways.
+_MISS_CAUSES: dict[str, tuple[str, ...]] = {
+    "not configured": ("not configured", "unconfigured"),
+    "never changed": ("never changed", "was never changed", "not changed since"),
+    "document gone": ("aged out", "purge", "deleted index", "has aged"),
+}
+# The pages that must carry it, with the region each one explains a miss in. A page absent here
+# is not read; adding a fifth explanation without adding it here is the gap this cannot close.
+_PAGES_EXPLAINING_A_MISS: tuple[str, ...] = (
+    "src/epics_mcp/server.py",
+    "src/epics_mcp/services/alarm_client.py",
+    "src/epics_mcp/services/checkers.py",
+    "src/epics_mcp/services/coverage.py",
+    "src/epics_mcp/operator_guide.md",
+)
 _SHIPPED_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -429,21 +474,43 @@ def _pages_that_ship() -> list[Path]:
     return [p for p in pages if p.is_file()]
 
 
+def _paragraphs(text: str) -> list[tuple[int, str]]:
+    """Split into paragraphs, each as (1-based start line, text with newlines folded to spaces).
+
+    Folding is needed because every occurrence of the claim wraps across lines. Folding the WHOLE
+    file instead would let a match run from the end of one paragraph into the start of the next,
+    which is a false positive nobody would be able to explain from the reported line.
+    """
+    lines = text.replace("\r\n", "\n").split("\n")
+    out: list[tuple[int, str]] = []
+    buf: list[str] = []
+    start = 1
+    for number, line in enumerate(lines, start=1):
+        if line.strip():
+            if not buf:
+                start = number
+            buf.append(line.strip())
+        elif buf:
+            out.append((start, " ".join(buf)))
+            buf = []
+    if buf:
+        out.append((start, " ".join(buf)))
+    return out
+
+
 def _import_only_claims() -> list[str]:
     hits: list[str] = []
     for page in _pages_that_ship():
         text = page.read_text(encoding="utf-8")
-        # Joined, because the claim wraps across lines in every place it occurs; the reported
-        # line number is the one the match STARTS on.
-        flat = text.replace("\r\n", "\n").replace("\n", " ")
-        for match in _ONLY_AT_IMPORT.finditer(flat):
-            line = flat.count("\n", 0, match.start()) + text[: match.start()].count("\n") + 1
-            hits.append(f"{page.relative_to(_SHIPPED_ROOT).as_posix()}:{line}: {match.group(0)}")
+        for start, paragraph in _paragraphs(text):
+            for match in _ONLY_AT_IMPORT.finditer(paragraph):
+                where = page.relative_to(_SHIPPED_ROOT).as_posix()
+                hits.append(f"{where}: paragraph at line {start}: {match.group(0)}")
     return hits
 
 
 def test_no_shipped_page_claims_the_import_is_the_only_precondition() -> None:
-    """A miss has several causes; a page that names one as the only one certifies a wrong No."""
+    """The negative half: the two historical wordings, and near neighbours of them, stay out."""
     hits = _import_only_claims()
     assert not hits, (
         "these places still claim the config-import precondition as the only one:\n  "
@@ -451,25 +518,78 @@ def test_no_shipped_page_claims_the_import_is_the_only_precondition() -> None:
     )
 
 
+@pytest.mark.parametrize("page", _PAGES_EXPLAINING_A_MISS)
+def test_every_page_explaining_a_miss_names_more_than_one_cause(page: str) -> None:
+    """The positive half, and the one a rewording cannot get around.
+
+    Each of these pages tells a caller what a ``false`` is worth. A page that names a single
+    cause is how the defect looked before GQ-459, whatever words it used, so this asks for the
+    content rather than forbidding a phrase.
+    """
+    text = (_SHIPPED_ROOT / page).read_text(encoding="utf-8").lower()
+    named = sorted(
+        cause for cause, phrases in _MISS_CAUSES.items() if any(p in text for p in phrases)
+    )
+    assert len(named) >= 2, (
+        f"{page} explains a miss but names {len(named)} cause(s) ({named or 'none'}); "
+        f"at least two of {sorted(_MISS_CAUSES)} must be named, or the page certifies a No it "
+        "cannot prove"
+    )
+
+
 def test_the_import_only_pattern_sees_the_wording_it_is_meant_to_catch() -> None:
-    """The negative control. Without it, a pattern that matches nothing would pass forever.
+    """Negative control on the pattern. Without it, one matching nothing would pass forever.
 
     Both historical wordings, because they differ: one says "at config-import time", the other
-    "when the tree was imported", and a guard that only knew the first would have left the
-    module docstring of alarm_client.py untouched.
+    "when the tree was imported". Plus the swapped clause order and one synonym, which the first
+    version of this pattern let through, found by a post-build review lens.
     """
     was = "a miss is a real negative only when the Alarm Logger was running at config-import time"
     other = "a MISS is only trustworthy if the Alarm Logger was running when the tree was imported"
+    swapped = "a real negative only if the tree was imported while the Alarm Logger was running"
+    synonym = "a real negative only if the Alarm Logger was up at config-import time"
     allowed = (
         "A miss can mean the config was never changed since the tree was imported, or that the "
         "logger was not running then, or that the document has aged out."
     )
-    assert _ONLY_AT_IMPORT.search(was)
-    assert _ONLY_AT_IMPORT.search(other)
+    # A MEASURED false positive, not an invented one: the first version of the widened pattern
+    # fired on this sentence in cli_common.py, which is about the display-tool engine and not
+    # about alarms at all. It is kept as a control so the alarm-context conjunct cannot be
+    # dropped again without something going red.
+    unrelated = (
+        "register the display tools only when the engine imports, keep the core server up, and "
+        "degrade LOUD when an installed engine fails to import"
+    )
+    for wording in (was, other, swapped, synonym):
+        assert _ONLY_AT_IMPORT.search(wording), wording
     assert not _ONLY_AT_IMPORT.search(allowed), (
         "naming the import as ONE cause among several must stay allowed, or the guard would "
         "forbid the very sentence it asks for"
     )
+    assert not _ONLY_AT_IMPORT.search(unrelated), (
+        "a sentence about a MODULE import and an unrelated 'up' must not match; the guard is "
+        "about the alarm logger, not about three common words"
+    )
+
+
+def test_a_paragraph_boundary_stops_a_match() -> None:
+    """The folding control: a whole-file fold made two unrelated paragraphs match as one.
+
+    Measured shape of the false positive, a bullet list where neither line ends in a full stop.
+    """
+    text = "- Run only the live suite against a running Alarm Logger\n\n- import the tree first\n"
+    assert not _import_only_claims_in(text), "a match must not span a blank line"
+    same_paragraph = "- a real negative only if the logger was running at config-import time\n"
+    assert _import_only_claims_in(same_paragraph), "within one paragraph it must still match"
+
+
+def _import_only_claims_in(text: str) -> list[str]:
+    """The paragraph scan over a literal, for the control above."""
+    return [
+        match.group(0)
+        for _, paragraph in _paragraphs(text)
+        for match in _ONLY_AT_IMPORT.finditer(paragraph)
+    ]
 
 
 # --- get_alarm_history (DS-3): projection · capped · query params · privacy ---

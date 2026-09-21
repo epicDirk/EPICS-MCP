@@ -232,6 +232,13 @@ def test_unalarmed_carries_the_change_log_caveat() -> None:
         "a proven alarm gap must say what a miss in a change-log is worth; "
         f"notes were {report.notes}"
     )
+    # The SECOND direction, pinned as strongly as the first: a deleted config leaves its last
+    # change document behind, so a 'yes' can outlive what it reports. Without this assertion the
+    # note could be cut back to the one-directional caveat and every test here would stay green,
+    # which is the defect this ticket found in the first place, one layer up.
+    assert any("deleted" in n for n in report.notes), (
+        f"the caveat must carry BOTH error directions; notes were {report.notes}"
+    )
 
 
 def test_no_alarm_gap_no_change_log_caveat() -> None:
