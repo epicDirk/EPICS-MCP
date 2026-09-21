@@ -213,8 +213,18 @@ class AlarmClient:
         ends in ``*``, so Elasticsearch answers 200 + ``[]`` instead of ``index_not_found``.
         Measured: ``/Accelerator/*Temp1Value`` → 1 record, while ``/accelerator/*Temp1Value``,
         ``/Nonexistent/*Temp1Value`` and a genuinely unconfigured PV ALL → ``[]``. Re-asking for
-        the bare tree (``/{config_name}/*``) separates them, it returns a record iff the tree name
-        was read as intended, so only the last of those four stays a real ``False``.
+        the bare tree (``/{config_name}/*``) separates them: it returns a record only if some
+        document in that index still carries the tree name, so the first three of those four
+        become ``None`` and the last stays ``False``.
+        ⚠ GQ-459: that ``False`` is NOT a proven absence, and the older wording here ("iff the
+        tree name was read as intended") claimed more than the probe can deliver in both
+        directions. The server wraps every pattern in stars
+        (``AlarmLogSearchUtil.java:309``), so the probe answers off ANY surviving document in the
+        tree, which says nothing about whether THIS PV's change document was ever written or is
+        still there; and a correctly spelled but EMPTY tree does not answer at all, which is why
+        ``_ALARM_TREE_UNKNOWN_NOTE`` lists that as its third cause. The verdict stays ``False``
+        because a provable-looking negative is what ``coverage_audit`` builds its gap list from,
+        and the tool layer attaches a note saying what it is worth.
 
         The returned ``detail`` is the config record reduced by :func:`_project_alarm_config`, the
         raw ES record's ``user``/``host`` (who changed the config) are dropped and the authored
@@ -233,8 +243,10 @@ class AlarmClient:
             leaf = str(record["config"]).rsplit("/", 1)[-1]
             if leaf == pv:
                 return True, _project_alarm_config(record)
-        # A miss is only a real negative if the tree answered at all, one extra request, and only
-        # on the miss path (a hit above already proved the tree).
+        # The tree probe separates "wrong tree name" from "this PV is not in the answer": one
+        # extra request, and only on the miss path (a hit above already proved the tree). ⚠ It
+        # does NOT make the miss a proven absence, see the method docstring: the index is a
+        # change-log and the probe answers off any surviving document in it.
         if not self._alarm_tree_answers(config_name):
             return None, {}
         return False, {}
@@ -242,8 +254,11 @@ class AlarmClient:
     def _alarm_tree_answers(self, config_name: str) -> bool:
         """Return True iff alarm tree *config_name* yields a READABLE config record.
 
-        Distinguishes a real "PV not configured" from an unknown/misspelled/mis-cased tree name,
-        which the server reports identically (200 + empty). See :meth:`is_alarm_configured`.
+        Distinguishes "this PV is not in the answer" from an unknown/misspelled/mis-cased tree
+        name, which the server reports identically (200 + empty). ⚠ GQ-459: that is the whole of
+        what it distinguishes. It does not establish that the PV is unconfigured, because the
+        index is a change-LOG and this probe answers off any document still in it. See
+        :meth:`is_alarm_configured`.
         S11: only a readable record (a dict with a string ``config``) counts as proof, junk is
         no evidence the tree name was read as intended, so a junk-only answer stays "not
         answered" and the miss above stays withheld (None), never a definitive False.

@@ -296,7 +296,8 @@ async def coverage_audit(
     the anchor), the Archiver and the Phoebus Alarm config. Each runtime plane is queried only when
     requested AND its *_URL is set; a missing URL withholds that plane (never a false 'no'). Returns
     the cross-coverage matrix (cf_and_display / cf_only=blind-spots / display_only) + verdicts
-    + critical_uncovered (delivered AND a proven gap), with honest lower-bound notes.
+    + critical_uncovered (delivered AND a gap), with honest bound notes: proven on the display and
+    archive planes, an UPPER bound on the alarm plane, whose index is a change-log.
     A .plt Data Browser trend is NOT a screen: has_display answers about screens alone, on_trend
     answers beside it, and a PV reachable only by opening a trend is named in trend_only and counts
     as a cf_only blind-spot (cf_trend_only is that milder subset of it).

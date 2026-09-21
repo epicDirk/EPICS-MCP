@@ -1434,8 +1434,12 @@ a broken configuration, and the entries themselves stay with `epics-doctor`. Two
   `alarmed`;
   `withheld` means that plane could not answer (disabled, capped, a per-PV timeout, or a capped
   display walk) and never counts as a gap, which is why `critical_uncovered` lists only PVs with a
-  PROVEN `no`. So the headline is a lower bound by construction: enable or fix the withheld plane
-  and re-run before reading a PV as covered.
+  `no`. So the headline is a lower bound by construction on the display and archive planes: enable
+  or fix the withheld plane and re-run before reading a PV as covered.
+  ⚠ **The ALARM plane runs the other way and the report says so above its figures**: an alarm `no`
+  comes from a change-LOG, so a PV configured once and never changed since reads like an
+  unconfigured one, and that half of the headline is an UPPER bound. Confirm a listed PV against
+  its alarm history before acting on it.
 
 ### A refusal that happens before any request exists (the tool-specific ones sit with their tool)
 

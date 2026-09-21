@@ -79,7 +79,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:255`, `epics_client.py:661`, `olog_client.py:183`) sit in
+  three entries below (`alarm_client.py:270`, `epics_client.py:661`, `olog_client.py:183`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
   ⚠️ Those two numbers were `490` and `181` until GQ-276 and had rotted where the table below had
@@ -181,12 +181,16 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 # 1446 passed / 65 skipped). Key is ``module:line``, the finer offset moves with any edit to the
 # line, which would make this table rot for a reason that is not a change in the finding.
 _UNOBSERVED: dict[str, str] = {
-    # RE-LOCATED +8 by the widened module docstring in GQ-459, which spelled out what a MISS on
-    # the config-change index is worth. Byte-identical against ``git show
-    # 1926a84:src/epics_mcp/services/alarm_client.py`` at their old numbers 244 and 247; the
-    # finding did not change, only where the line sits.
-    "alarm_client.py:252": "empty-list fallback; disabling it is not noticed",
-    "alarm_client.py:255": "any() filter over the config records",
+    # RE-LOCATED +23 by GQ-459, in two steps: the widened module docstring, which spelled out what
+    # a MISS on the config-change index is worth, then the ticket's own post-build review, which
+    # found the METHOD below still describing the tree probe the way the module docstring had
+    # just stopped describing it. Byte-identical against ``git show
+    # 1926a84:src/epics_mcp/services/alarm_client.py`` at their old numbers 244 and 247, compared
+    # line for line rather than assumed; the finding did not change, only where the line sits.
+    # ⚠ Twice in one ticket is the tell: these keys move with any edit ABOVE them in the file,
+    # which the comment above this table already says. Reported as a neighbouring finding.
+    "alarm_client.py:267": "empty-list fallback; disabling it is not noticed",
+    "alarm_client.py:270": "any() filter over the config records",
     # RE-LOCATED +5 by the widened HistoryResult docstring in GQ-290 (byte-identical against
     # ``git show 39c276d:...`` at its old number 152), then +3 more by that change's post-build
     # review, which qualified the empty-branch comment and the status docstring

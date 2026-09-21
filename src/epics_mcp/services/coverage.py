@@ -39,8 +39,13 @@ offline-testable (mirrors :mod:`~.crossplane`). Stays **free of ``opi_navigation
 NEVER
 ``no``: a plane that could not answer (disabled, capped, per-PV timeout, or an incomplete display
 inventory) withholds rather than false-flag a gap. ``critical_uncovered`` = CF-registered (provably
-delivered) AND ≥1 **proven** gap (``no``); a PV with a ``withheld`` gap is excluded (the gap is not
+delivered) AND ≥1 gap (``no``); a PV with a ``withheld`` gap is excluded (the gap is not
 provable) and named once in a note.
+
+⚠ GQ-459: "proven" holds for the display and archive planes and NOT for the alarm one. The alarm
+``no`` comes from a change-LOG, so a PV configured once and never changed since is reported the
+same as an unconfigured one. That half of the figure is an UPPER bound, the cap's half a lower
+one, and both are said above the numbers in ``render_markdown`` rather than in its notes.
 
 **Honesty (lower bounds):** ``displays_incomplete`` (context-capped → a not-in-``D`` PV could sit on
 a not-fully-expanded display → ``has_display=withheld``, never a false blind-spot) · ``cf_capped`` /
@@ -213,9 +218,10 @@ class CoverageReport(BaseModel):
     #: asks "do we show something the registry does not know", where showing it on a trend counts.
     #: Narrowing this one to ``S`` too would DROP unregistered trend PVs from every report.
     display_only: tuple[str, ...] = ()
-    #: Headline: CF-registered AND ≥1 PROVEN gap (``no``; withheld gaps excluded).
+    #: Headline: CF-registered AND ≥1 gap (``no``; withheld gaps excluded). Proven on the display
+    #: and archive planes; the alarm plane is an UPPER bound (GQ-459, change-log index).
     critical_uncovered: tuple[str, ...] = ()
-    #: Triage splits: CF-registered PVs with a proven gap on each plane.
+    #: Triage splits: CF-registered PVs with a gap on each plane, under the bound named above.
     blind_spots: tuple[str, ...] = ()
     unarchived: tuple[str, ...] = ()
     unalarmed: tuple[str, ...] = ()
@@ -670,6 +676,21 @@ def render_markdown(report: CoverageReport) -> str:
             "and a cap can only lengthen it."
         )
         lines.extend(f"  - {display}" for display in report.displays_incomplete)
+    # GQ-459: the same rule, applied to the other direction. The cap makes every gap figure a
+    # LOWER bound; the alarm plane makes its own gap figure an UPPER one, because a miss in a
+    # change-log is not a proven absence. Both belong above the numbers for the reason the comment
+    # on the cap warning gives: a reader who takes critical_uncovered at face value and meets the
+    # caveat afterwards has already drawn the conclusion. This was the defect a post-build review
+    # found in the first build of this ticket, where the caveat sat in Notes, under the figures.
+    if report.unalarmed:
+        lines.append(
+            f"- ⚠️ **the alarm half of these figures is an UPPER bound:** `unalarmed` lists "
+            f"{len(report.unalarmed)} PV(s) whose alarm config the logger did not return, but the "
+            "index searched is a change-LOG, so a PV configured once and never changed since reads "
+            "exactly like an unconfigured one. Confirm a PV against its alarm history before "
+            "acting on it. The reverse errs too: a deleted config leaves its last document behind, "
+            "so `alarmed: yes` can outlive the configuration it reports."
+        )
     lines.append("")
     lines.append(f"- **Registered AND on a screen (cf_and_display):** {len(report.cf_and_display)}")
     lines.append(f"- **Registered but on NO screen (cf_only / blind-spot):** {len(report.cf_only)}")
@@ -688,8 +709,12 @@ def render_markdown(report: CoverageReport) -> str:
     lines.append(f"- **Shown but NOT registered (display_only):** {len(report.display_only)}")
     lines.extend(f"  - {pv}" for pv in report.display_only)
     lines.append("")
+    # GQ-459: "proven" is qualified as soon as the alarm plane contributed a gap, because on that
+    # plane a `no` is not proven. The headline carries it rather than the Notes, see the warning
+    # above; without the alarm plane the word stands unchanged.
+    proven = "proven gap" if not report.unalarmed else "proven gap, alarm half an UPPER bound"
     lines.append(
-        f"- **🔴 critical_uncovered (delivered + proven gap):** {len(report.critical_uncovered)}"
+        f"- **🔴 critical_uncovered (delivered + {proven}):** {len(report.critical_uncovered)}"
     )
     lines.extend(f"  - {pv}" for pv in report.critical_uncovered)
     lines.append(

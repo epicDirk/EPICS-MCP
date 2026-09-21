@@ -456,6 +456,10 @@ _PAGES_EXPLAINING_A_MISS: tuple[str, ...] = (
     "src/epics_mcp/services/checkers.py",
     "src/epics_mcp/services/coverage.py",
     "src/epics_mcp/operator_guide.md",
+    # Added by a post-build review lens: the first list left out the one page the same commit had
+    # edited. docs/safety.md is where a reader looks up which negatives are definitive, so it is
+    # exactly where a single-cause explanation does the most damage.
+    "docs/safety.md",
 )
 _SHIPPED_ROOT = Path(__file__).resolve().parents[1]
 

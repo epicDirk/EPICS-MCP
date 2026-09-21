@@ -241,6 +241,36 @@ def test_unalarmed_carries_the_change_log_caveat() -> None:
     )
 
 
+def test_the_alarm_bound_is_rendered_above_the_figures() -> None:
+    """Where the caveat sits decides whether it is read at all.
+
+    This module's own comment on the context-cap warning states the rule: a caveat that qualifies
+    a figure belongs ABOVE it, because "a reader who takes critical_uncovered at face value and
+    meets the caveat afterwards has already drawn the conclusion". The first build of GQ-459 put
+    the alarm caveat in Notes, under the numbers, which is the same defect one layer down; a
+    post-build review found it. Position, not presence, is what this pins.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        alarmed=_FakeAlarm(set()),
+        alarm_requested=True,
+    )
+    rendered = render_markdown(report)
+    warning = rendered.find("UPPER bound")
+    headline = rendered.find("critical_uncovered")
+    assert warning != -1, f"the alarm bound must be rendered at all:\n{rendered}"
+    assert warning < headline, (
+        "the alarm bound must stand ABOVE critical_uncovered, not in the Notes below it"
+    )
+    # And the headline itself may not keep calling the alarm half proven.
+    assert "delivered + proven gap):" not in rendered, (
+        "with an alarm gap present the headline may not claim an unqualified proven gap"
+    )
+
+
 def test_no_alarm_gap_no_change_log_caveat() -> None:
     """The negative control: a note stapled onto every report would pass the test above."""
     report = audit_coverage(
