@@ -419,9 +419,16 @@ PINNED_AST: dict[str, int] = {
     # _patch_naming_client; none lost). Measured 2026-09-14 with sham --check at EPICS-MCP bde5ea7
     # plus the GQ-403 change. Re-recorded because the CRITERION widened, not because the code under
     # audit changed.
-    DOUBLES: 286,
+    # 286 -> 288 with GQ-459: two new tests in test_alarm.py install an AlarmClient double to
+    # check that the TOOL layer attaches its change-log caveat to a false and not to a true.
+    # Re-recorded after re-reading the candidate list, not after swapping a number: the verdict
+    # is unchanged. Neither test is a sham guard, because neither claims anything about a payload
+    # the client would have had to validate. What they assert is a note this repo's own tool layer
+    # writes, and the double is what isolates that layer from the client at all.
+    DOUBLES: 288,
     # 21 -> 91 with GQ-403, the same widening: 70 of the 184 carry payload vocabulary.
-    EDGE_VOCABULARY: 91,
+    # 91 -> 92 with GQ-459: of the two above, the true-path one carries payload vocabulary.
+    EDGE_VOCABULARY: 92,
     CLIENT_MODULES: 6,
     # 96 -> 98 with GQ-290: the bare-[] branch in ArchiverClient.get_pv_history is one new
     # isinstance call plus one new whole condition. Re-recorded because the SHAPE grew, not
@@ -439,8 +446,12 @@ PINNED_AST: dict[str, int] = {
 # line, all of them TestServiceUpdate tests under _install_fake in test_olog_update.py: the service
 # path calls the module-level attachment_round_trip in olog_client.py, three of whose guard lines
 # it executes, before it reaches the doubled class.
-# Six of those 25 carry payload vocabulary, hence 91 - 6 = 85.
-PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 261, SHAM_CANDIDATES: 85}
+# Six of those 25 carry payload vocabulary, hence 92 - 6 = 86.
+# 261 -> 263 and 85 -> 86 with GQ-459, from a COVERAGE_CORE=ctrace map recorded 2026-09-21 over
+# this tree: the two new tests in test_alarm.py execute no client-edge line (they stop at the tool
+# layer, which is the point of them), so both figures move by the same additions as their AST
+# twins. The verdict is unchanged, and the candidate that moved was READ, see PINNED_CANDIDATES.
+PINNED_COVERAGE: dict[str, int] = {NOT_EXECUTING: 263, SHAM_CANDIDATES: 86}
 PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 
 # The candidate list, by NAME. A count is not a finding: the verdict "no sham guard found" was
@@ -448,6 +459,12 @@ PINNED: dict[str, int] = {**PINNED_AST, **PINNED_COVERAGE}
 # satisfies every numeric pin. Recording the members turns "re-judge the verdict" from an
 # instruction nobody can check into a diff: added names are what has not been read.
 PINNED_CANDIDATES: tuple[str, ...] = (
+    # READ 2026-09-21 for GQ-459, verdict unchanged: NOT a sham guard. It installs an AlarmClient
+    # double and then asserts something the TOOL layer writes, namely that a true carries no
+    # change-log caveat, never something the client would have had to validate in an answered
+    # payload. The double is what isolates the tool layer from the client, which is the only way
+    # to test that layer at all; there is no client-edge guard being claimed and skipped here.
+    "test_alarm.py::test_is_alarm_configured_true_carries_no_miss_caveat",
     "test_archiver.py::test_get_pv_history_bad_time_is_not_a_connection_error",
     "test_archiver.py::test_list_archived_pvs_empty_pattern_with_this_appliance_is_fine",
     "test_archiver.py::test_list_archived_pvs_refuses_pattern_with_this_appliance",

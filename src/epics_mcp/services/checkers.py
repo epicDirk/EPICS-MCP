@@ -290,6 +290,21 @@ _ALARM_NO_TREE_NOTE = (
     "default tree (they are site-specific). Answer withheld; name the tree to query."
 )
 
+# GQ-459: what a False is worth, said on the answer instead of only in the docs. The verdict stays
+# False (a provable "no" is what coverage_audit's gap list is made of), but /search/alarm/config is
+# a change-LOG, so a miss has several causes and only one of them is "not configured". The tree
+# probe that guards this verdict proves the tree NAME was read, never that its log is complete:
+# the server wraps every pattern in stars, so "/{tree}/*" answers off a single surviving document.
+_ALARM_MISS_NOTE = (
+    "Not in alarm config tree {config!r}. What this No is worth: /search/alarm/config is a "
+    "change-log, one document per configuration CHANGE, not the configuration itself. A miss "
+    "therefore means the PV is not configured, OR its config was never changed since the tree was "
+    "imported, OR its change document has aged out of the index. The tree probe behind this "
+    "verdict shows the tree name was read, not that its log is complete. The error runs both "
+    "ways: a deleted configuration leaves its last document behind (the logger drops Kafka "
+    "tombstones), so a hit can outlive the configuration it reports."
+)
+
 
 def _alarm_error_code(exc: AlarmError) -> str:
     """A discrete error code for an Alarm-Logger failure whose SERVER answered.
@@ -498,6 +513,11 @@ async def query_alarm_configured(
         }
         if configured is None:
             result["note"] = _ALARM_TREE_UNKNOWN_NOTE.format(config=config_name)
+        elif configured is False:
+            # GQ-459: the caveat travels WITH the verdict. A caller that reads only `configured`
+            # is still told False, but one that reads the answer learns what kind of No it is.
+            # Deliberately not on the True path: a hit proves configuration and needs no caveat.
+            result["note"] = _ALARM_MISS_NOTE.format(config=config_name)
         return result
 
     try:

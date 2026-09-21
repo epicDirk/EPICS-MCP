@@ -13,7 +13,7 @@ map recorded with ``COVERAGE_CORE=ctrace`` and some ten minutes, which is not a 
 
 Findings of the 2026-07-25 run, kept here rather than in a document nobody reads again:
 
-* Sham guards (direction B): **none found, which is not the same as none there.** 286 tests
+* Sham guards (direction B): **none found, which is not the same as none there.** 288 tests
   install a client class double, in their own body or, since GQ-403 on 2026-09-14, through a
   helper, a fixture or an autouse fixture; until then only the body counted. A class-level double
   takes the real client off the path, which is what it is FOR: the double used legitimately, to
@@ -24,7 +24,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   GQ-153 test of 2026-08-23, which replaces the whole ``ChannelFinderClient`` class so a coverage
   audit can be joined against a known registry offline, and every test the GQ-403 widening added.
   They stay in that position until the sweep is re-run, which is what the guard below exists to
-  keep visible. 91 of those also carry payload vocabulary, and every one that executes no guard
+  keep visible. 92 of those also carry payload vocabulary, and every one that executes no guard
   line was read (the first set on 2026-07-25, the two BG-DTHR tests on 2026-08-19, the GQ-403
   additions on 2026-09-14; each group's reading is a comment in ``PINNED_CANDIDATES``): they claim
   SERVICE-layer or doctor-level behaviour (an already-constructed exception must not be relabelled
@@ -37,8 +37,8 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   as "no sham guard found by this filter", and widen the filter before treating it as a stronger
   statement.
 
-  S33, and the distinction matters for what can be checked cheaply: 91 of those carry payload
-  vocabulary before any coverage map is consulted, and 85 remain once the tests that DO execute a
+  S33, and the distinction matters for what can be checked cheaply: 92 of those carry payload
+  vocabulary before any coverage map is consulted, and 86 remain once the tests that DO execute a
   guard line are removed. The vocabulary figure follows from this repository's AST alone and is
   therefore pinned by a test in the ordinary gate; the two coverage figures are decided by the
   coverage map and are checked only by ``scripts/guard_audit.py sham --check --coverage-db ...``.
@@ -79,7 +79,7 @@ Findings of the 2026-07-25 run, kept here rather than in a document nobody reads
   ⚠️ Two caveats on the counterpart number. First, "observed in both polarities" is weaker than it
   sounds for the 21 RAISE guards: their enabling polarity fires the guard on every input, so every
   covering test dies by construction and only the disabling half carries information. Second,
-  three entries below (`alarm_client.py:247`, `epics_client.py:661`, `olog_client.py:183`) sit in
+  three entries below (`alarm_client.py:255`, `epics_client.py:661`, `olog_client.py:183`) sit in
   comprehension filters, where the tool builds no whole-condition target, for those "unobserved"
   means "this CONJUNCT is unobserved", the rest of the condition still stood during the mutant.
   ⚠️ Those two numbers were `490` and `181` until GQ-276 and had rotted where the table below had
@@ -181,8 +181,12 @@ _GUARD_POPULATION: dict[str, tuple[int, int]] = {
 # 1446 passed / 65 skipped). Key is ``module:line``, the finer offset moves with any edit to the
 # line, which would make this table rot for a reason that is not a change in the finding.
 _UNOBSERVED: dict[str, str] = {
-    "alarm_client.py:244": "empty-list fallback; disabling it is not noticed",
-    "alarm_client.py:247": "any() filter over the config records",
+    # RE-LOCATED +8 by the widened module docstring in GQ-459, which spelled out what a MISS on
+    # the config-change index is worth. Byte-identical against ``git show
+    # 1926a84:src/epics_mcp/services/alarm_client.py`` at their old numbers 244 and 247; the
+    # finding did not change, only where the line sits.
+    "alarm_client.py:252": "empty-list fallback; disabling it is not noticed",
+    "alarm_client.py:255": "any() filter over the config records",
     # RE-LOCATED +5 by the widened HistoryResult docstring in GQ-290 (byte-identical against
     # ``git show 39c276d:...`` at its old number 152), then +3 more by that change's post-build
     # review, which qualified the empty-branch comment and the status docstring

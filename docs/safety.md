@@ -269,7 +269,12 @@ retrieval servlet answers 404, which raises first). That reading is the ordinary
 proof: the same bytes come back when a retrieval fails server-side and is only logged there, and
 the two are indistinguishable from the client. The result's `note` carries that limit to the
 caller. (`is_alarm_configured`'s `null` stays the *readable-but-
-tree-ambiguous* verdict; an unreadable payload there raises like everywhere else.) Definitive
+tree-ambiguous* verdict; an unreadable payload there raises like everywhere else. ⚠ GQ-459: its
+`false` is NOT in the definitive class either, and says so in its own `note`. The index behind it
+logs configuration CHANGES, so a PV that was configured once and never touched again reads the
+same as one that was never configured. It is kept as `false` rather than withheld because
+`coverage_audit`'s gap list is built from provable negatives and would otherwise go permanently
+empty, so it is an upper bound on the gap, carried to the caller as such.) Definitive
 negatives come only from each service's measured signal: Archiver `getPVTypeInfo` HTTP 404 and
 Olog `get_log_entry` HTTP 404. **Naming HTTP 204/404 is definitive only once the responder proves
 it is the Naming Service** via its `/rest/swagger.json` beacon (S13); otherwise the "not

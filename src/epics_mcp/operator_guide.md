@@ -982,6 +982,12 @@ Four limits, because this returns a SAMPLE and not an enumeration:
   is not, because that tree may hold nothing in the config index. A CORRECTLY spelled name then
   answers `configured: null` all the same. The note lists "or an empty tree" as its third cause, so
   read it to the end instead of re-typing the name.
+  ⚠ **The same asymmetry runs one level down, per PV, and it answers `false` instead of `null`**
+  (GQ-459): a PV whose alarm state you can see in the history can be missing from the config index,
+  because that index logs CHANGES. The tree then answers, the PV does not, and the verdict is a
+  definitive-looking `false`. Measured 2026-09-20 in one tree: none of the PVs sampled with alarm
+  activity in the preceding week was reported configured, while the whole tree's most recent
+  change document was seven weeks old.
 - Feeding the derived name back into `root` as a cross-check is itself server-decided and UNVERIFIED
   (see the alarm-history filters below): a logger that does not support the parameter ignores it and
   BROADENS the result instead of failing, so that check counts only differentially, with one value
@@ -1139,8 +1145,11 @@ the read throttle, and a server that will not start) · `err-guide`.
   `null` = withheld; the recipe "Discover the alarm config-tree names" above says where a tree name
   comes from, and why a correct one can still be withheld) / `get_alarm_history` (`start` + `end`
   required; `pv_name` is matched as a wildcard SUBSTRING of the config path, `Value` matches both
-  `...:Temp1Value` and `...:12VValue`). A `false` is a true negative only if the Alarm Logger was
-  running at config-import time, otherwise treat it as unreliable; the tool cannot flag this.
+  `...:Temp1Value` and `...:12VValue`). A `false` is WEAKER than it looks and the answer now says
+  so in its `note`: the index searched is a change-LOG, so a miss means not configured, or never
+  changed since the tree was imported, or the change document has aged out. Read `false` as an
+  upper bound on the gap and confirm before acting. It errs the other way too: a deleted config
+  leaves its last document behind, so `true` can outlive the configuration it reports.
 - **Narrow an alarm-history query.** `get_alarm_history` has optional SERVER-SIDE filters:
   `root` (config tree name(s), comma-separated), `command` (`Enabled`/`Disabled`, the config
   change that turned an alarm on/off; maps to the `enabled` field and is restricted to config-change
@@ -1164,6 +1173,17 @@ the read throttle, and a server that will not start) · `err-guide`.
   correctly spelled tree that simply holds nothing in the config index answers `null` too. Which of
   the two you have follows from where the name came from: see "Discover the alarm config-tree names"
   above.
+- **`is_alarm_configured` answers `configured:false` for a PV you can see alarming.** Not a
+  contradiction and not a bug in the tree name: the index it searches is a change-LOG, one document
+  per configuration CHANGE. A PV whose alarm config was never changed since the tree was imported,
+  or whose change document has aged out, is reported exactly like an unconfigured one. The tree
+  probe that stands behind the `false` proves only that the tree NAME was read, so a single
+  surviving document anywhere in the tree is enough to make every other PV a definitive-looking
+  `false`. The answer carries a `note` saying this; `coverage_audit` says it over its gap list.
+  Read a `false` as an upper bound and confirm the PV before acting on it, for instance against
+  its alarm history. ⚠ It errs the other way too: deleting an alarm config publishes a Kafka
+  tombstone, the logger drops tombstones before indexing, so the last change document of a DELETED
+  PV stays put and answers `true` for good.
 
 ### Olog reads: a 401 that is not about credentials, and an empty list that is not empty
 

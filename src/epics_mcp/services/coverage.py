@@ -448,6 +448,7 @@ def audit_coverage(
         display_total=len(display_set),
         archive_withheld=archive_withheld,
         alarm_withheld=alarm_withheld,
+        unalarmed=unalarmed,
         withheld_gap_excluded=withheld_gap_excluded,
         trend_only=sorted(trend_only_set),
         unclassified_files=unclassified_files,
@@ -491,6 +492,7 @@ def _coverage_notes(
     display_total: int,
     archive_withheld: list[str],
     alarm_withheld: list[str],
+    unalarmed: list[str],
     withheld_gap_excluded: list[str],
     trend_only: list[str],
     unclassified_files: list[str],
@@ -566,9 +568,20 @@ def _coverage_notes(
     if alarm_withheld:
         notes.append(
             f"'alarmed' withheld for {len(alarm_withheld)} PV(s), the per-PV Alarm query "
-            "failed/timed out for them (a partial-plane lower bound; never counted as a gap). "
-            "NOTE: a clean miss on /search/alarm/config is a real negative only if the Logger "
-            "was running at config-import time (the config index is a change-log)."
+            "failed/timed out for them (a partial-plane lower bound; never counted as a gap)."
+        )
+    if unalarmed:
+        # GQ-459: the caveat used to hang on the branch above, so it printed when NOTHING was
+        # proven and went silent exactly when the report claimed proven gaps. Measured 2026-09-20
+        # in tree ACCP: all eight PVs with alarm activity answered a definitive False, so nothing
+        # was withheld and the caveat never reached the caller. It belongs on the gap list.
+        notes.append(
+            f"'alarmed' is 'no' for {len(unalarmed)} PV(s), and that verdict is weaker than it "
+            "looks: /search/alarm/config is a change-log, so a miss means not configured, OR "
+            "never changed since the tree was imported, OR the change document has aged out. "
+            "Treat this list as an upper bound on the alarm gap, and confirm a PV before acting "
+            "on it. The error runs both ways: a deleted configuration leaves its last document "
+            "behind, so 'yes' can outlive the configuration it reports."
         )
     if context_capped:
         # Named in full ("per-display"), not shortened to "the context cap": a caller who has

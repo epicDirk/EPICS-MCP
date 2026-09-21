@@ -12,9 +12,17 @@ mandatory and its FIRST path segment (after a leading slash) selects the ES inde
 path ``/{ConfigName}/*{pv}`` (the ``*`` spans any component nesting between root and the PV).
 
 ⚠ ``/search/alarm/config`` is a config-CHANGE log (one ES doc per change): a HIT proves the PV is
-configured; a MISS is only trustworthy if the Alarm Logger was running when the tree was imported
-(else the change never reached ES). Callers should treat a miss as a real negative only under that
-precondition and otherwise as withheld.
+configured; a MISS has SEVERAL causes and only one of them is "not configured". The change
+document may never have been written (the config was not changed after the tree was imported, or
+the logger was down when it was), or it may be gone (``ElasticIndexPurger`` deletes whole indices
+once retention is switched on; it is off in the shipped defaults, but the deployment decides).
+GQ-459: the miss is still reported as ``False`` because a provable "no" is what ``coverage_audit``
+builds its gap list from, but the tool answer carries a note saying what that No is worth, and
+callers who cannot read the note should treat the gap list as an upper bound.
+
+⚠ The error runs BOTH ways. Deleting an alarm config publishes a Kafka tombstone, and the logger
+filters tombstones out before indexing, so the last change document of a DELETED PV stays in the
+index and answers ``True`` forever.
 
 ``alarm_url`` is the logger REST root (e.g. ``http://localhost:8081``). Queries need no
 authentication by default; an optional ``Authorization`` header is forwarded for secured

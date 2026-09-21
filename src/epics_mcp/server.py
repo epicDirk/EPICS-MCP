@@ -1106,8 +1106,12 @@ async def is_alarm_configured(
     """Report whether a PV has an alarm configuration (Phoebus Alarm Logger /search/alarm/config).
 
     Read-only. Disabled by default, returns enabled=false unless EPICS_MCP_ALARM_URL is set.
-    A hit proves the PV is configured in the alarm tree; a miss is a real negative only when the
-    Alarm Logger was running at config-import time (else the config change never reached its index).
+    A hit proves the PV is configured in the alarm tree. A MISS IS WEAKER THAN IT LOOKS, and the
+    answer carries a note saying so: /search/alarm/config is a change-LOG, so a miss means the PV
+    is not configured, or its config was never changed since the tree was imported, or its change
+    document has aged out of the index. The tree probe behind a false shows the tree NAME was read,
+    never that its log is complete. The error also runs the other way: a deleted config leaves its
+    last document behind (the logger drops Kafka tombstones), so a hit can outlive what it reports.
 
     configured is true / false / null, and null means WITHHELD, the tree itself returned nothing,
     so 'this PV is not configured' cannot be told apart from 'that is not the tree name'; a note

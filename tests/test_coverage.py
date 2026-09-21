@@ -204,6 +204,51 @@ def test_requested_but_url_unset_notes() -> None:
     assert any("Alarm check requested" in n for n in report.notes)
 
 
+# --- GQ-459: the change-log caveat reaches the caller who has a PROVEN gap --------------------
+
+
+def test_unalarmed_carries_the_change_log_caveat() -> None:
+    """A populated gap list must say what its entries are worth.
+
+    The caveat existed, but only on the ``alarm_withheld`` branch, so it printed exactly when
+    nothing was proven and stayed silent when the report claimed proven gaps. Measured 2026-09-20
+    in tree ACCP: every one of the eight PVs with alarm activity answered a definitive False, so
+    ``alarm_withheld`` was empty and the caveat never reached the caller who needed it.
+    """
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        alarmed=_FakeAlarm(set()),  # answers cleanly, and the answer is "not configured"
+        alarm_requested=True,
+    )
+    assert report.rows[0].alarmed == "no"
+    assert "DEV:A" in report.unalarmed
+    assert not any("'alarmed' withheld" in n for n in report.notes), (
+        "precondition: nothing is withheld here, so the old branch is not what carries the caveat"
+    )
+    assert any("change-log" in n for n in report.notes), (
+        "a proven alarm gap must say what a miss in a change-log is worth; "
+        f"notes were {report.notes}"
+    )
+
+
+def test_no_alarm_gap_no_change_log_caveat() -> None:
+    """The negative control: a note stapled onto every report would pass the test above."""
+    report = audit_coverage(
+        [_row("DEV:A")],
+        scope="DEV:",
+        channelfinder=_FakeCF({"DEV:A"}),
+        cf_requested=True,
+        alarmed=_FakeAlarm({"DEV:A"}),  # configured, so there is no gap to caveat
+        alarm_requested=True,
+    )
+    assert report.rows[0].alarmed == "yes"
+    assert not report.unalarmed
+    assert not any("change-log" in n for n in report.notes), report.notes
+
+
 # --- ChannelFinder is the anchor: disabled / capped / failed → no cf verdicts ---
 
 

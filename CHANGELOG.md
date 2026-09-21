@@ -27,6 +27,21 @@ carry breaking changes).
 
 ### Changed
 
+- **`is_alarm_configured` no longer lets a `false` travel without saying what it is worth.** The
+  index it searches, `/search/alarm/config`, is a change-LOG: one document per configuration
+  CHANGE, not the configuration itself. A PV whose alarm config was never changed after the tree
+  was imported, or whose change document has aged out, reads exactly like an unconfigured one, and
+  the tree probe that stands behind a `false` proves only that the tree NAME was read. Measured
+  2026-09-20 against one live tree: none of the eight PVs sampled with alarm activity in the
+  preceding week was reported configured, while that whole tree's most recent change document was
+  seven weeks old. The verdict is still `false`, because `coverage_audit` builds its gap list from
+  provable negatives and withholding would empty that list for good, but the answer now carries a
+  `note`, `coverage_audit` says the same over its gap list, and the shipped prose names every
+  cause instead of the single precondition it used to name. The error runs the other way too and
+  is now documented: deleting an alarm config publishes a Kafka tombstone, the logger drops
+  tombstones before indexing, so the last document of a DELETED PV stays and answers `true`. No
+  field was added or removed and no verdict changed, so nothing on the wire breaks.
+
 - **The `outputSchema` of a tool no longer carries prose.** `tools/list` repeated the one-line
   docstring of the `reach` shape as a `description` inside the `outputSchema` of every typed tool
   that answers with it. Measured at the client on 2026-08-30, the host drops the `outputSchema`

@@ -1,6 +1,8 @@
 """Offline tests for the Phoebus Alarm Logger client + tools (no network)."""
 
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -334,6 +336,140 @@ async def test_is_alarm_configured_tool_enabled(monkeypatch: pytest.MonkeyPatch)
     assert result["enabled"] is True
     assert result["configured"] is True
     assert result["config"] == "Accelerator"
+
+
+# --- GQ-459: a False is a MISS in a change-log, and the answer has to say so ----------------------
+# The tree probe proves only that the tree NAME was read, never that its change-log is complete:
+# the server wraps every pattern in stars, so "/{tree}/*" matches on a single surviving document
+# and every other PV then falls to a definitive False. Measured 2026-09-20 in tree ACCP: 0 of 8 PVs
+# with alarm activity in the last seven days were reported configured, while the whole tree's most
+# recent change document was from 2026-07-27. The verdict stays False (callers and coverage_audit
+# depend on a provable "no"), but it no longer travels without the caveat.
+
+
+def _fake_alarm_client(verdict: bool | None) -> type:
+    """An AlarmClient stand-in whose is_alarm_configured returns *verdict* for any PV."""
+
+    class _Fake:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def is_alarm_configured(
+            self, pv: str, config_name: str = "Accelerator"
+        ) -> tuple[bool | None, dict[str, object]]:
+            return verdict, {}
+
+    return _Fake
+
+
+@pytest.mark.asyncio
+async def test_is_alarm_configured_false_carries_the_change_log_caveat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A False must say what it is worth: the index searched is a change-log, not the config."""
+    monkeypatch.setattr(
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
+    )
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _fake_alarm_client(False))
+
+    result = await _is_alarm_configured("X", "Accelerator")
+
+    assert result["configured"] is False
+    note = result.get("note")
+    assert note is not None, (
+        "a proven-looking False must carry a note saying what the No is worth "
+        "(the config index is a change-log; a missing document is not a missing configuration)"
+    )
+    # Both failure directions, because the endpoint errs both ways: a change document can be
+    # absent for a configured PV, and it SURVIVES for a deleted one (the logger drops Kafka
+    # tombstones), so the caveat may not present itself as a one-directional caveat.
+    assert "change-log" in note
+    assert "deleted" in note
+
+
+@pytest.mark.asyncio
+async def test_is_alarm_configured_true_carries_no_miss_caveat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The negative control: a tool that staples the caveat onto EVERY answer would pass above."""
+    monkeypatch.setattr(
+        "epics_mcp.services.checkers.get_config", lambda: EpicsConfig(alarm_url="http://alarm")
+    )
+    monkeypatch.setattr("epics_mcp.services.checkers.AlarmClient", _fake_alarm_client(True))
+
+    result = await _is_alarm_configured("X", "Accelerator")
+
+    assert result["configured"] is True
+    assert result.get("note") is None, "a hit proves the PV is configured; it needs no caveat"
+
+
+# --- GQ-459: no shipped page may name the import as the ONLY thing a miss depends on -------------
+# The repo used to carry one precondition, "the Alarm Logger was running at config-import time",
+# and to present it as the whole of it. Measured at the source: a change document is equally
+# absent for a config that was never CHANGED since import, and the purge component deletes whole
+# indices when it is switched on. Naming one cause as the only one certifies the No it means to
+# qualify, which is why this is a guard and not a one-off edit. Mentioning the import as ONE
+# cause stays allowed; claiming it is the only one does not.
+
+_ONLY_AT_IMPORT = re.compile(r"only\b[^.]{0,140}\brunning\b[^.]{0,140}\bimport", re.IGNORECASE)
+_SHIPPED_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _pages_that_ship() -> list[Path]:
+    """Every page a caller can read: the package sources, the guide, docs/ and the README.
+
+    CHANGELOG.md is deliberately absent. It is a record of what was said when, and correcting a
+    past entry would be the drift this guard exists to prevent.
+    """
+    src = _SHIPPED_ROOT / "src"
+    pages = [p for p in src.rglob("*.py") if "__pycache__" not in p.parts]
+    pages += sorted(src.rglob("*.md"))
+    pages += sorted((_SHIPPED_ROOT / "docs").glob("*.md"))
+    pages.append(_SHIPPED_ROOT / "README.md")
+    return [p for p in pages if p.is_file()]
+
+
+def _import_only_claims() -> list[str]:
+    hits: list[str] = []
+    for page in _pages_that_ship():
+        text = page.read_text(encoding="utf-8")
+        # Joined, because the claim wraps across lines in every place it occurs; the reported
+        # line number is the one the match STARTS on.
+        flat = text.replace("\r\n", "\n").replace("\n", " ")
+        for match in _ONLY_AT_IMPORT.finditer(flat):
+            line = flat.count("\n", 0, match.start()) + text[: match.start()].count("\n") + 1
+            hits.append(f"{page.relative_to(_SHIPPED_ROOT).as_posix()}:{line}: {match.group(0)}")
+    return hits
+
+
+def test_no_shipped_page_claims_the_import_is_the_only_precondition() -> None:
+    """A miss has several causes; a page that names one as the only one certifies a wrong No."""
+    hits = _import_only_claims()
+    assert not hits, (
+        "these places still claim the config-import precondition as the only one:\n  "
+        + "\n  ".join(hits)
+    )
+
+
+def test_the_import_only_pattern_sees_the_wording_it_is_meant_to_catch() -> None:
+    """The negative control. Without it, a pattern that matches nothing would pass forever.
+
+    Both historical wordings, because they differ: one says "at config-import time", the other
+    "when the tree was imported", and a guard that only knew the first would have left the
+    module docstring of alarm_client.py untouched.
+    """
+    was = "a miss is a real negative only when the Alarm Logger was running at config-import time"
+    other = "a MISS is only trustworthy if the Alarm Logger was running when the tree was imported"
+    allowed = (
+        "A miss can mean the config was never changed since the tree was imported, or that the "
+        "logger was not running then, or that the document has aged out."
+    )
+    assert _ONLY_AT_IMPORT.search(was)
+    assert _ONLY_AT_IMPORT.search(other)
+    assert not _ONLY_AT_IMPORT.search(allowed), (
+        "naming the import as ONE cause among several must stay allowed, or the guard would "
+        "forbid the very sentence it asks for"
+    )
 
 
 # --- get_alarm_history (DS-3): projection · capped · query params · privacy ---
