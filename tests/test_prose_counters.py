@@ -40,11 +40,12 @@ full one, so a count taken there would pass locally and break the core-only CI, 
 deliberately names no figure. A module that derives the lane counts for five other files must not
 hand-type them in its own docstring, where nothing would ever check them.)
 
-⚠️ One TEST does read the wire, since [GQ-405]: the union reader is held against the schema each
-declared array row advertises. It takes no LENGTH, so the sentence above stands; what changes is
-the cost, because reaching the wire pulls the server stack and through it p4p, numpy and OpenBLAS.
-Measured on 2026-09-16: the module alone runs in about 36 s, 25 s of which is the provenance
-tracer.
+⚠️ Some TESTS do read the wire, and none of them takes a LENGTH from it, so the sentence above
+stands. Since [GQ-405] the union reader is held against the schema each declared array row
+advertises; since [GQ-433] the tool index is held against the name and the input properties of
+every tool the running lane carries. What changes is the cost, because reaching the wire pulls the
+server stack and through it p4p, numpy and OpenBLAS. Measured on 2026-09-21: the module alone runs
+in about 36 s, 23 s of which is the provenance tracer.
 """
 
 from __future__ import annotations
@@ -1198,9 +1199,11 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
     keeps; that :func:`_registered_tools` still counts both lines is [GQ-436]'s question, not
     decided here.
 
-    The promise "the name the wire carries" is held on constructed input, by
+    The promise "the name the wire carries" is held twice: on constructed input by
     ``test_the_tool_index_is_keyed_on_the_wire_name``, because no registration in this package
-    spells a name today (measured 2026-09-21) and the key is therefore inert on the real tree.
+    spells a name today (measured 2026-09-21) and the key is therefore inert on the real tree; and
+    against the wire itself by ``test_the_tool_index_agrees_with_the_wire_on_names_and_parameters``,
+    for the tools the running lane carries.
     """
     found: dict[str, _RegisteredTool] = {}
     unresolved: list[str] = []
@@ -4048,6 +4051,58 @@ async def test_the_union_reader_agrees_with_the_wire_on_every_array_row() -> Non
         "the union reader and the advertised schema disagree about a declared array row, so the "
         "nullable-array count is reading a spelling rather than a type; teach the walk the "
         "spelling, do not edit the row:\n  " + "\n  ".join(disagreements)
+    )
+
+
+async def test_the_tool_index_agrees_with_the_wire_on_names_and_parameters() -> None:
+    """[GQ-433]: the names and parameters the tool index reads, held against what the wire carries.
+
+    :func:`_tool_index` derives a tool's wire name from the spelling of its registration and
+    :func:`_wire_parameters` its properties from the signature minus ``exclude_args``. Both are
+    readings of a foreign library's rules, probed once with a scratch server, and a reading nobody
+    compares is how this module came to promise "registered tool name" over a function-name key.
+    So every tool the running lane carries is looked up in the index by the name the WIRE gives it,
+    and its advertised input properties are compared with the ones read. What a syntax tree cannot
+    know, a ``Context``-typed parameter FastMCP injects rather than advertises, a naming rule that
+    moves with a FastMCP release, surfaces here as a named disagreement.
+
+    ONE DIRECTION, deliberately: wire to index. A tool the index holds and the wire lacks is not
+    reported, because telling a tool that is WRONGLY absent from one the lane legitimately leaves
+    out needs a statement of which tools a lane may drop, and that belongs to the reader of the
+    registry surfaces ([GQ-432]), not to the key.
+
+    NOT a measurement in the sense of the module header: nothing here takes a LENGTH from the wire,
+    only each carried tool's own name and properties, so the lane trap that header describes does
+    not apply. ⚠️ The price of that: a display tool is compared only where the ``displays`` group
+    is installed, so in the core-only lane CI runs the display half is held by the constructed test
+    and by :func:`_registration_arguments` alone.
+
+    RED-PROOF: read ``exclude_args`` no longer in :func:`_wire_parameters` and exclude a parameter
+    of a carried tool at its registration, and this names the tool and the parameter; key the index
+    on the function name again and register a function under a second name, and this names the
+    wire name no registration resolved to.
+    """
+    advertised = await wire_tools_by_name()
+    index = _registered_tool_index()
+    disagreements: list[str] = []
+    for name, listed in sorted(advertised.items()):
+        tool = index.get(name)
+        if tool is None:
+            disagreements.append(
+                f"{name}: on the wire, and no registration this reader resolved carries that name"
+            )
+            continue
+        read = _wire_parameters(tool)
+        told = frozenset((listed.inputSchema or {}).get("properties") or {})
+        if read != told:
+            disagreements.append(
+                f"{name}: the registration reads as {sorted(read)}, "
+                f"the wire advertises {sorted(told)}"
+            )
+    assert not disagreements, (
+        "the tool index and the wire disagree about a tool's name or its input properties, so a "
+        "count keyed on that index is reading a spelling rather than the wire; teach the reader "
+        "the form, do not edit a sentence:\n  " + "\n  ".join(disagreements)
     )
 
 
