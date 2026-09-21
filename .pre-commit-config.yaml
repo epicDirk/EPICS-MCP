@@ -16,7 +16,7 @@
 #   ruff -> `pass_filenames: true`. Every rule family selected here is PER FILE exact; ruff has no
 #   cross-file analysis, and in the hook's own run pre-commit sets the unstaged changes to tracked
 #   files aside beforehand.
-#   ⚠️ The condition belongs to that statement and was missing here until 2026-09-20:
+#   ⚠️ The condition belongs to that statement and was missing here until 2026-09-21:
 #   a run stashes ONLY when it carries neither `--all-files` nor `--files`. That flag condition
 #   covers the run the hook fires at `git commit`, and a bare `pre-commit run` typed by hand just
 #   as well (measured 2026-09-20 on the pre-commit 4.6.0 this repository pins in `uv.lock`,
