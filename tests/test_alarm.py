@@ -522,23 +522,77 @@ def test_no_shipped_page_claims_the_import_is_the_only_precondition() -> None:
     )
 
 
+def _causes_named_together(text: str) -> tuple[int, list[str]]:
+    """The most causes any SINGLE paragraph names beside the change-log anchor.
+
+    ⚠ Whole-file matching was the first version of this, and a post-build review measured it to
+    be a placebo on a long page: against the defective tree at 1926a84 it would have passed
+    operator_guide.md, because "purge" occurs there in a sentence about the Olog rate limit and
+    "not configured" in one about ChannelFinder. Neither is a cause of an alarm miss. Binding the
+    causes to the paragraph that carries the anchor is what makes the guard about its subject.
+
+    📏 Both versions replayed against 1926a84, which is what says this is a repair and not a
+    preference: the whole-file version went red on four of five pages and passed the guide, the
+    paragraph version goes red on SIX of six. The two pages the paragraph version additionally
+    catches are the guide and docs/safety.md, and docs/safety.md is the page the first build had
+    also left out of the page list entirely.
+    """
+    best: list[str] = []
+    for _, paragraph in _paragraphs(text.lower()):
+        # The anchor by MEANING, not by spelling: the repo writes it "change-log", "change log"
+        # and "config-CHANGE log" in different places, and a guard that only knew one hyphenation
+        # would report a page as silent while it explains the miss perfectly well.
+        if not any(a in paragraph for a in ("change-log", "change log", "changes log")):
+            continue
+        named = sorted(
+            cause for cause, phrases in _MISS_CAUSES.items() if any(p in paragraph for p in phrases)
+        )
+        if len(named) > len(best):
+            best = named
+    return len(best), best
+
+
 @pytest.mark.parametrize("page", _PAGES_EXPLAINING_A_MISS)
 def test_every_page_explaining_a_miss_names_more_than_one_cause(page: str) -> None:
     """The positive half, and the one a rewording cannot get around.
 
     Each of these pages tells a caller what a ``false`` is worth. A page that names a single
     cause is how the defect looked before GQ-459, whatever words it used, so this asks for the
-    content rather than forbidding a phrase.
+    content rather than forbidding a phrase. The causes must stand in ONE paragraph together
+    with the change-log anchor, see :func:`_causes_named_together` for what that repairs.
     """
-    text = (_SHIPPED_ROOT / page).read_text(encoding="utf-8").lower()
-    named = sorted(
-        cause for cause, phrases in _MISS_CAUSES.items() if any(p in text for p in phrases)
-    )
-    assert len(named) >= 2, (
-        f"{page} explains a miss but names {len(named)} cause(s) ({named or 'none'}); "
-        f"at least two of {sorted(_MISS_CAUSES)} must be named, or the page certifies a No it "
+    text = (_SHIPPED_ROOT / page).read_text(encoding="utf-8")
+    count, named = _causes_named_together(text)
+    assert count >= 2, (
+        f"{page} explains a miss but no single paragraph names more than {count} cause(s) "
+        f"({named or 'none'}) beside the change-log anchor; at least two of "
+        f"{sorted(_MISS_CAUSES)} must stand together there, or the page certifies a No it "
         "cannot prove"
     )
+
+
+def test_the_cause_check_reads_a_paragraph_and_not_a_whole_file() -> None:
+    """Negative control on the positive guard, built from the MEASURED false pass.
+
+    Two unrelated paragraphs, each carrying one phrase, plus an anchor paragraph carrying
+    neither: that is the shape operator_guide.md had at 1926a84, and the whole-file version of
+    this check called it two causes named.
+    """
+    scattered = (
+        "The config index is a change-log and a miss is a real negative only when the Alarm "
+        "Logger was running at config-import time.\n"
+        "\n"
+        "Unrelated: enabled=false means CF is not configured, the two are distinct.\n"
+        "\n"
+        "Unrelated: the limit is enforced atomically (the purge/check/record step).\n"
+    )
+    count, _ = _causes_named_together(scattered)
+    assert count < 2, "phrases scattered over unrelated paragraphs must not count as causes"
+    together = (
+        "The index is a change-log, so a miss means the PV is not configured, or its config was "
+        "never changed since the tree was imported.\n"
+    )
+    assert _causes_named_together(together)[0] >= 2, "one paragraph naming two causes must pass"
 
 
 def test_the_import_only_pattern_sees_the_wording_it_is_meant_to_catch() -> None:

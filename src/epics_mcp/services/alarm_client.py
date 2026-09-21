@@ -11,11 +11,12 @@ mandatory and its FIRST path segment (after a leading slash) selects the ES inde
 (``*<config>*``). A bare PV name (no leading slash) raises HTTP 500 there, so we ALWAYS build the
 path ``/{ConfigName}/*{pv}`` (the ``*`` spans any component nesting between root and the PV).
 
-⚠ ``/search/alarm/config`` is a config-CHANGE log (one ES doc per change): a HIT proves the PV is
+⚠ ``/search/alarm/config`` is a config change-log (one ES doc per change): a HIT proves the PV is
 configured; a MISS has SEVERAL causes and only one of them is "not configured". The change
-document may never have been written (the config was not changed after the tree was imported, or
-the logger was down when it was), or it may be gone (``ElasticIndexPurger`` deletes whole indices
-once retention is switched on; it is off in the shipped defaults, but the deployment decides).
+document may never have been written (the config was never changed since the tree was imported, or
+the logger was down when it was), or it may have aged out (``ElasticIndexPurger`` deletes whole
+indices once retention is switched on; it is off in the shipped defaults, but the deployment
+decides).
 GQ-459: the miss is still reported as ``False`` because a provable "no" is what ``coverage_audit``
 builds its gap list from, but the tool answer carries a note saying what that No is worth, and
 callers who cannot read the note should treat the gap list as an upper bound.

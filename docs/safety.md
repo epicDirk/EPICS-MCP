@@ -271,7 +271,7 @@ the two are indistinguishable from the client. The result's `note` carries that 
 caller. (`is_alarm_configured`'s `null` stays the *readable-but-
 tree-ambiguous* verdict; an unreadable payload there raises like everywhere else. ⚠ GQ-459: its
 `false` is NOT in the definitive class either, and says so in its own `note`. The index behind it
-logs configuration CHANGES, so a miss means the PV is not configured, OR its config was never
+is a change-log of configurations, so a miss means the PV is not configured, OR its config was never
 changed since the tree was imported, OR its change document has aged out of the index. It is kept
 as `false` rather than withheld because
 `coverage_audit`'s gap list is built from provable negatives and would otherwise go permanently
