@@ -856,8 +856,13 @@ def _registration_arguments(
     REFUSED rather than guessed, in the manner of :func:`_tool_registrations`: a name or an
     exclusion that is not a literal, and a ``**`` splat that may carry either. Guessing the
     function's name there is the defect this reading exists to remove, a tool keyed under a name
-    the wire does not carry. ⚠️ What this does NOT read: ``version=``, under which the same name can
-    stand on the wire twice, and ``app=``. Neither occurs in this package (measured 2026-09-21).
+    the wire does not carry. ⚠️ What this does NOT read: ``version=``, under which ``list_tools``
+    carried one name twice (probed 2026-09-21; which of the two the protocol hands a client is not
+    measured); and the arguments that can take a tool off the wire again, ``auth=``, a ``meta``
+    visibility and ``app=``, read in FastMCP 3.4.4 by the QA lenses on 2026-09-23, not probed, and
+    reported to [GQ-432]. No tool registration in this package carries ``version=``, ``app=`` or
+    ``auth=``, and the one that carries ``meta=`` (``set_pv_value``) has no visibility in it (read
+    2026-09-23; the ``version=`` in ``server.py`` belongs to the ``FastMCP`` constructor).
     """
     if not isinstance(registrar, ast.Call):
         return None, frozenset()
@@ -1313,7 +1318,11 @@ def _registered_tool_index() -> dict[str, _RegisteredTool]:
     """The tools of the two registrar modules by wire name, read through this module's file seam.
 
     The reading itself, and what it refuses, is :func:`_tool_index`; only the two files live here,
-    so the index can be driven on constructed trees by a test.
+    so the index can be driven on constructed trees by a test. Three tests hold it:
+    ``test_the_tool_index_is_keyed_on_the_wire_name`` on constructed trees,
+    ``test_the_tool_index_agrees_with_the_wire_on_names_and_parameters`` against the wire of the
+    running lane, and ``test_the_readers_behind_the_tool_index_count_every_wire_name``, which feeds
+    every reader that calls this seam a twin of every tool.
     """
     return _tool_index(
         (path.name, _parsed(path)) for path in (_SRC / "server.py", _SRC / "display_tools.py")
@@ -1322,7 +1331,12 @@ def _registered_tool_index() -> dict[str, _RegisteredTool]:
 
 @cache
 def _tool_result_type() -> dict[str, str]:
-    """Registered tool name, as the wire carries it, to the return annotation of its function."""
+    """Registered tool name, as the wire carries it, to the return annotation of its function.
+
+    Keyed on the wire name as :func:`_registered_tool_index` holds it; that a second name of one
+    function is a second key here is held by
+    ``test_the_readers_behind_the_tool_index_count_every_wire_name``.
+    """
     return {
         name: ast.unparse(tool.function.returns)
         for name, tool in _registered_tool_index().items()
@@ -1354,6 +1368,13 @@ def _wire_parameters(tool: _RegisteredTool) -> frozenset[str]:
     2026-09-23). The registrar module is read, not the wire, for the lane reason
     :func:`_tools_declaring_parameter` gives; the wire test holds these limits only in a lane that
     carries the tool, and CI runs the core lane, where no display tool is on the wire.
+
+    Held three ways: the exclusion, the keyword-only kind and the refusal of positional-only on
+    constructed input by ``test_the_tool_index_is_keyed_on_the_wire_name``; against the advertised
+    properties of every tool the running lane carries by
+    ``test_the_tool_index_agrees_with_the_wire_on_names_and_parameters``; and through
+    :func:`_tools_declaring_parameter` with twins that exclude ``context_cap`` by
+    ``test_the_readers_behind_the_tool_index_count_every_wire_name``.
     """
     arguments = tool.function.args
     if arguments.posonlyargs:
@@ -1377,7 +1398,10 @@ def _tools_declaring_parameter(parameter: str) -> frozenset[str]:
     hand-typed four-element tuple instead, which is not a reading of anything: giving a fifth tool
     a ``title`` parameter left both sentences false and the whole lane green.
 
-    Which names count as "on the wire" is :func:`_wire_parameters`, with its measured limit.
+    Which names count as "on the wire" is :func:`_wire_parameters`, with its measured limit. That
+    this reader goes through it, and not through the bare signature, is held by
+    ``test_the_readers_behind_the_tool_index_count_every_wire_name``: a twin that excludes
+    ``context_cap`` must not count.
 
     AST over the registrar modules rather than ``mcp.list_tools()``, for the reason this module
     states elsewhere: the wire answers with fewer tools in the core-only lane. Measured, that makes
@@ -1402,6 +1426,11 @@ def _tools_implemented_by(
     function registered under two names answers with both. Intersecting *functions* with the keys
     instead is the construction [GQ-433] removed: two namespaces in one cut, equal only while no
     registration spells a name.
+
+    ⚠️ As coarse as the call graph that feeds it: :func:`_reaches` keys a function on its bare
+    name, so a function of one name in two modules is one function here, and only the name can be
+    compared, not the pair of module and name that :func:`_tool_index` judges collisions on (read
+    2026-09-23).
     """
     return frozenset(name for name, tool in index.items() if tool.function.name in functions)
 
@@ -3957,6 +3986,104 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
     assert not findings, "_tool_index misreads a registration:\n  " + "\n  ".join(findings)
 
 
+def test_the_readers_behind_the_tool_index_count_every_wire_name() -> None:
+    """[GQ-433]: the readers behind the tool index, held on the REAL tree plus a twin of every tool.
+
+    On the real tree no registration spells a name of its own (measured 2026-09-21), so every
+    reader that moved onto the wire name answers there exactly what the function-name cut it
+    replaced answered, and putting one of them back left every other test green: measured on
+    2026-09-23 in a throwaway copy of ``407c586``, one reversal per reader, 27 passed each time.
+    So the real index is taken as it is, every tool gets a twin under ``<name>_twin``, the state a
+    second ``mcp.tool(name=...)`` line produces in the source, and each reader is asked again. A
+    display tool's twin is a display tool, an Olog write tool's twin is a second write tool a client
+    can call, a twin carries ``title`` where its tool does, and a twin that excludes
+    ``context_cap`` does not take it. The twin excludes ``context_cap`` only where the signature
+    has it, since FastMCP refuses an exclusion of a parameter that is not there. Every set must be
+    non-empty without the twins, or a reversal over an empty row would pass unseen.
+
+    Fed through :func:`_registered_tool_index`, the seam each of these readers calls by its module
+    name, with every memoized helper cleared before and after, as :func:`_trace_measure` does.
+
+    RED-PROOF: put ``_display_tool_names`` back on the functions ``display_tools.py`` defines,
+    either Olog reader back on the intersection with the keys, ``_tools_declaring_parameter`` back
+    on the bare signature, or ``_tool_result_type`` back on the function name, and this names that
+    reader.
+    """
+    module = sys.modules[__name__]
+
+    def sets() -> dict[str, frozenset[str]]:
+        return {
+            "display tools": _display_tool_names(),
+            "tools taking a title": _tools_declaring_parameter("title"),
+            "tools taking a context_cap": _tools_declaring_parameter("context_cap"),
+            "tools with a return annotation": frozenset(_tool_result_type()),
+        }
+
+    def counts() -> dict[str, int]:
+        return {
+            "olog write tools": _olog_write_tools(),
+            "olog round-tripping tools": _olog_round_trip_tools(),
+        }
+
+    helpers = _memoized_helpers()
+    try:
+        for helper in helpers:
+            helper.cache_clear()
+        real = _registered_tool_index()
+        sets_alone, counts_alone = sets(), counts()
+        twins = {
+            f"{name}_twin": _RegisteredTool(
+                tool.module,
+                _Registration(
+                    tool.registration.lineno,
+                    tool.registration.function,
+                    f"{name}_twin",
+                    tool.registration.excluded
+                    | ({"context_cap"} if "context_cap" in _wire_parameters(tool) else set()),
+                ),
+                tool.function,
+            )
+            for name, tool in real.items()
+        }
+        for helper in helpers:
+            helper.cache_clear()
+        with pytest.MonkeyPatch.context() as patcher:
+            patcher.setattr(module, "_registered_tool_index", lambda: {**real, **twins})
+            sets_twinned, counts_twinned = sets(), counts()
+    finally:
+        for helper in helpers:
+            helper.cache_clear()
+
+    findings = [
+        f"{label}: empty on the real tree" for label, alone in sets_alone.items() if not alone
+    ]
+    findings += [f"{label}: none on the real tree" for label, n in counts_alone.items() if not n]
+    if set(twins) & set(real):
+        findings.append(f"a twin's name is taken already: {sorted(set(twins) & set(real))}")
+    expected = {
+        label: alone
+        if label == "tools taking a context_cap"
+        else alone | {f"{name}_twin" for name in alone}
+        for label, alone in sets_alone.items()
+    }
+    for label, read in sets_twinned.items():
+        extra, missing = sorted(read - expected[label]), sorted(expected[label] - read)
+        if extra or missing:
+            findings.append(
+                f"{label}: with a twin of every tool the reader has {extra} it should not "
+                f"and lacks {missing}"
+            )
+    for label, n in counts_twinned.items():
+        if n != 2 * counts_alone[label]:
+            findings.append(
+                f"{label}: {counts_alone[label]} alone, {n} with twins, not twice as many"
+            )
+    assert not findings, (
+        "a reader behind the tool index does not count a second wire name of one function, so the "
+        "function-name cut [GQ-433] removed is back:\n  " + "\n  ".join(findings)
+    )
+
+
 def test_no_other_module_reaches_the_registrar() -> None:
     """A tool registered anywhere but ``server.py`` and ``display_tools.py`` is in no lane count.
 
@@ -4211,17 +4338,23 @@ async def test_the_tool_index_agrees_with_the_wire_on_names_and_parameters() -> 
     NOT a measurement in the sense of the module header: nothing here takes a LENGTH from the wire,
     only each carried tool's own name and properties, so the lane trap that header describes does
     not apply. ⚠️ The price of that: a display tool is compared only where the ``displays`` group
-    is installed, so in the core-only lane CI runs the display half is held by the constructed test
-    and by :func:`_registration_arguments` alone.
+    is installed, so in the core-only lane CI runs the display half is held by the constructed test,
+    by :func:`_registration_arguments` and, for the readers behind the index, by
+    ``test_the_readers_behind_the_tool_index_count_every_wire_name``.
 
     RED-PROOF: read ``exclude_args`` no longer in :func:`_wire_parameters` and exclude a parameter
     of a carried tool at its registration, and this names the tool and the parameter; key the index
     on the function name again and register a function under a second name, and this names the
-    wire name no registration resolved to.
+    wire name no registration resolved to; hand it an empty wire, and the guard against a loop over
+    nothing says so.
     """
     advertised = await wire_tools_by_name()
     index = _registered_tool_index()
     disagreements: list[str] = []
+    assert advertised, (
+        "the running lane carries no tool at all, so there is nothing to hold the index against "
+        "and the loop below would pass having compared nothing"
+    )
     for name, listed in sorted(advertised.items()):
         tool = index.get(name)
         if tool is None:
