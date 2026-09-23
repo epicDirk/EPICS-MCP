@@ -851,10 +851,14 @@ def _registration_arguments(
     every other keyword is handed on the same way, and where the inner call says otherwise the
     outer one wins. ``enabled=`` cannot stand on the registration itself at all, ``FastMCP.tool()``
     refuses it with a ``TypeError`` (probed 2026-09-21). So the applying call is REFUSED when it
-    carries any keyword, a ``**``
-    splat included, or anything but exactly one positional argument. Two shapes that used to end
-    in the unresolved half of :func:`_tool_index`, ``mcp.tool(...)()`` and
-    ``mcp.tool(...)(name_or_fn=fn)``, end here now, in the counting path as well.
+    carries any keyword, a ``**`` splat included, spreads its positional arguments with ``*``, or
+    has anything but exactly one positional argument. A ``*`` is refused on every ``mcp.tool(...)``
+    call too, the direct one included: in a syntax tree ``*fns`` is ONE argument, at run time it is
+    any number, and FastMCP takes ``name_or_fn`` as its only positional parameter (read in
+    ``server.py`` of FastMCP 3.4.4, not probed). Three shapes that used to end in the unresolved
+    half of :func:`_tool_index`, ``mcp.tool(...)()``, ``mcp.tool(...)(name_or_fn=fn)`` and
+    ``mcp.tool(...)(*fns)``, end here now, in the counting path as well, and so does the direct
+    call ``mcp.tool(*fns)``.
 
     REFUSED rather than guessed, in the manner of :func:`_tool_registrations`: a name or an
     exclusion that is not a literal, and a ``**`` splat that may carry either. Guessing the
@@ -886,6 +890,16 @@ def _registration_arguments(
         unreadable.append(
             f"{where}: the call that applies it, {ast.unparse(applied)!r}, passes "
             f"{len(applied.args)} positional arguments rather than the one function it registers"
+        )
+    if any(isinstance(item, ast.Starred) for item in registrar.args):
+        unreadable.append(
+            f"{where}: {ast.unparse(registrar)!r} spreads its positional arguments from an "
+            "expression, so the slot that holds the function or the name is not readable"
+        )
+    if applied is not None and any(isinstance(item, ast.Starred) for item in applied.args):
+        unreadable.append(
+            f"{where}: the call that applies it, {ast.unparse(applied)!r}, spreads its positional "
+            "arguments from an expression, so neither their number nor the function is readable"
         )
     spellings = [("name=", keywords.get("name"))]
     if not direct:
@@ -1238,8 +1252,10 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
     A registration whose function its registrar module defines MORE THAN ONCE is refused too, at
     any depth: ``defined`` can point at one definition only, and :func:`_wire_parameters` would
     read that one's signature on a guess. That includes names Python binds unambiguously, a method
-    of a class or a helper inside another function beside a module-level function (read, not
-    probed): there the uncertainty is this reading's, not FastMCP's. ⚠️ Not read: a name bound
+    of a class or a helper inside another function beside a module-level function, and a
+    ``typing.overload`` stack, whose last definition is the one bound (read, not probed): there the
+    uncertainty is this reading's, not FastMCP's, and each of the three is held by a case of
+    ``test_the_tool_index_is_keyed_on_the_wire_name``. ⚠️ Not read: a name bound
     again after its ``def``, by an assignment or an import. None of these occurs in this package
     (measured 2026-09-23).
 
@@ -1328,8 +1344,10 @@ def _registered_tool_index() -> dict[str, _RegisteredTool]:
     ``test_the_tool_index_agrees_with_the_wire_on_names_and_parameters`` against the wire of the
     running lane, and ``test_the_readers_behind_the_tool_index_count_every_wire_name``, which feeds
     the readers behind it a twin of every tool. When a registration in the real tree was refused,
-    five tests went red (measured 2026-09-23 at ``823048d``): the two that check the claims and
-    their sources, the union reader against the wire, and these two.
+    five tests went red (measured 2026-09-23 at ``823048d``):
+    ``test_every_claimed_counter_matches_its_set``,
+    ``test_every_claim_declares_which_source_it_reads``,
+    ``test_the_union_reader_agrees_with_the_wire_on_every_array_row`` and these two.
     """
     return _tool_index(
         (path.name, _parsed(path)) for path in (_SRC / "server.py", _SRC / "display_tools.py")
@@ -3794,9 +3812,10 @@ def test_the_registration_reader_counts_every_form_and_refuses_the_rest() -> Non
     the direct call, in both spellings of its slot), so each must be counted and named. Every
     refused shape reaches a registrar in a way the reader cannot follow, so a tool registered
     through it would be on the wire and in no count. Neither the direct call nor any refused shape
-    occurs in ``server.py`` or ``display_tools.py`` (measured 2026-09-16), which is exactly why they
-    are held here and not on the tree: a decision that is inert on the real table survives its own
-    removal unnoticed.
+    occurs in ``server.py`` or ``display_tools.py`` (measured 2026-09-16), and neither does a ``*``
+    on a ``mcp.tool(...)`` call or on the call that applies one (measured 2026-09-23), which is
+    exactly why they are held here and not on the tree: a decision that is inert on the real table
+    survives its own removal unnoticed.
 
     RED-PROOF: make :func:`_direct_registration_target` answer ``None`` and the counted module is
     refused at its direct calls; switch the refusal off and every refused shape is reported.
@@ -3833,6 +3852,8 @@ def test_the_registration_reader_counts_every_form_and_refuses_the_rest() -> Non
         ("a ready Tool object", "mcp.add_tool(prepared)\n"),
         ("a tool taken off the wire again", 'mcp.remove_tool("later")\n'),
         ("a factory applied to nothing", "mcp.tool()()\n"),
+        ("a factory applied to a spread", "mcp.tool()(*FUNCTIONS)\n"),
+        ("a direct call spreading its slot", "mcp.tool(*FUNCTIONS)\n"),
     ):
         try:
             _tool_registrations(ast.parse(source), "probe.py")
@@ -3856,12 +3877,13 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
     ``name=`` and in the first slot, positional or as ``name_or_fn=``, the direct call with
     ``name=``, ``exclude_args=``, an empty name and one name for two functions (2026-09-21);
     ``name=``, ``exclude_args=`` and ``enabled=`` on the call that applies the registration, one
-    function under one name with two exclusions, a positional-only parameter (2026-09-23).
-    :func:`_registration_arguments`, :func:`_tool_index` and :func:`_wire_parameters` record what
-    came out. Every other shape here is refused, not probed: a name or an exclusion that is no
-    literal, a splat, another keyword or a count other than one on the applying call, a function
-    defined twice, and a direct form beside a call position, whose running order is read in
-    FastMCP, not probed.
+    function under one name with an empty and a non-empty exclusion, a positional-only parameter
+    (2026-09-23). :func:`_registration_arguments`, :func:`_tool_index` and :func:`_wire_parameters`
+    record what came out. Every other shape here is refused, not probed: a name or an exclusion
+    that is no literal, a splat, another keyword or a count other than one on the applying call, a
+    ``*`` on a ``mcp.tool(...)`` call or on the applying call, two different non-empty exclusions
+    under one name, a function defined twice or stacked with ``typing.overload``, and a direct form
+    beside a call position, whose running order is read in FastMCP, not probed.
 
     RED-PROOF, one per decision: key the index on ``registration.function`` again and ``reader``
     and ``reader_capless`` land on one key with different exclusions, which the index refuses; drop
@@ -3869,9 +3891,12 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
     no keyword-only parameter and ``reader`` loses its ``context_cap``; cut the function names
     against the keys in :func:`_tools_implemented_by` and ``writer_again`` is lost; judge a
     collision on the function name alone and the two modules pass as one; refuse two EQUAL
-    exclusions under one name and the second ``reader_capless`` is refused; switch any one refusal
-    off, or narrow it (a growing exclusion only, the module level only, no class body, a direct
-    form that does not read its exclusion, no line in the message), and a shape below reports it.
+    exclusions under one name and the second ``reader_capless`` is refused; compare two exclusions
+    by anything short of the whole set (whether they are empty, their size, their smallest name, a
+    proper subset, or disjointness) and the overlapping pair below passes; switch any one refusal
+    off, or narrow it (a growing exclusion only, the module level only, no class body, no
+    ``overload`` stub, a direct form that does not read its exclusion, a ``*`` let through, no line
+    in the message), and a shape below reports it.
     """
     module = textwrap.dedent(
         """
@@ -3977,6 +4002,16 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
             "carries keywords of its own",
         ),
         (
+            "a function spread on the call that applies it",
+            "mcp.tool()(*FUNCTIONS)\n",
+            "spreads its positional",
+        ),
+        (
+            "a function spread into a direct call",
+            "mcp.tool(*FUNCTIONS)\n",
+            "spreads its positional",
+        ),
+        (
             "an exclusion read before the same registration without it",
             "async def capped(p: int = 0) -> None: ...\n\n"
             'mcp.tool(name="same", exclude_args=["p"])(capped)\nmcp.tool(name="same")(capped)\n',
@@ -3989,6 +4024,13 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
             "'same'",
         ),
         (
+            "two overlapping exclusions of one function under one name",
+            "async def capped(p: int = 0, q: int = 0, r: int = 0) -> None: ...\n\n"
+            'mcp.tool(name="same", exclude_args=["p", "q"])(capped)\n'
+            'mcp.tool(name="same", exclude_args=["p", "r"])(capped)\n',
+            "'same'",
+        ),
+        (
             "a registered function also defined inside another function",
             "def outer() -> None:\n    async def first() -> None: ...\n\nmcp.tool()(first)\n",
             "probe.py:8: first is defined 2 times",
@@ -3998,6 +4040,12 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
             "class Holder:\n    async def first(self, p: int = 0) -> None: ...\n\n"
             "mcp.tool()(first)\n",
             "defined 2 times",
+        ),
+        (
+            "a registered function stacked with typing.overload",
+            "@overload\nasync def first(p: int) -> None: ...\n\n"
+            "@overload\nasync def first(p: str) -> None: ...\n\nmcp.tool()(first)\n",
+            "first is defined 3 times",
         ),
     ):
         try:
@@ -4045,14 +4093,16 @@ def test_the_readers_behind_the_tool_index_count_every_wire_name() -> None:
     display tool's twin is a display tool, an Olog write tool's twin is a second write tool a client
     can call, a twin carries ``title`` where its tool does, and a twin that excludes
     ``context_cap`` does not take it. The twin excludes ``context_cap`` only where the tool puts it
-    on the wire, since FastMCP refuses an exclusion of a parameter that is not there. Every set must
-    be non-empty without the twins, or a reversal over an empty row would pass unseen.
+    on the wire, and keeps any exclusion its tool already has: where the wire lacks the parameter
+    there is nothing to take off. Every set must be non-empty without the twins, or a reversal over
+    an empty row would pass unseen.
 
     A second pass holds what the twins cannot, because each twin keeps its tool's module: that
     ``_display_tool_names`` judges by the REGISTRAR MODULE. One extra tool, ``<name>_elsewhere``,
     is registered by ``server.py`` with the function of a display tool, the state of ``server.py``
     registering a function of the same name under a name of its own, which :func:`_tool_index`
-    admits; the display set must not change.
+    admits; the display set must not change for a reader fed through the seam: no name may join
+    it, and none may leave it.
 
     Fed through :func:`_registered_tool_index`, the seam each of these readers calls by its module
     name, with every memoized helper cleared before, between and after the passes, as
@@ -4062,7 +4112,8 @@ def test_the_readers_behind_the_tool_index_count_every_wire_name() -> None:
     either Olog reader back on the intersection with the keys, ``_tools_declaring_parameter`` back
     on the bare signature, or ``_tool_result_type`` back on the function name, and the first pass
     names that reader; join ``_display_tool_names`` through the functions ``display_tools.py``
-    defines, and the second pass names the extra tool.
+    defines, and the second pass names the extra tool; give each function the module of its last
+    registration, and the second pass names the display tool that drops out.
     """
     module = sys.modules[__name__]
     capped_label = "_tools_declaring_parameter: tools taking a context_cap"
@@ -4157,6 +4208,12 @@ def test_the_readers_behind_the_tool_index_count_every_wire_name() -> None:
         findings.append(
             f"_display_tool_names: reads {moved}, which server.py registers, as display tools, so "
             "it judges by the function and not by the registrar module"
+        )
+    dropped = sorted(sets_alone["_display_tool_names: display tools"] - displayed_elsewhere)
+    if dropped:
+        findings.append(
+            f"_display_tool_names: drops {dropped} once server.py registers one of their "
+            "functions under a name of its own, so a second registrar takes the tool away"
         )
     assert not findings, (
         "a reader behind the tool index does not count a second wire name of one function, so the "
