@@ -825,7 +825,7 @@ def _direct_registration_target(call: ast.Call) -> ast.expr | None:
 
 
 def _registration_arguments(
-    registrar: ast.expr, label: str, *, direct: bool = False
+    registrar: ast.expr, label: str, *, direct: bool = False, applied: ast.Call | None = None
 ) -> tuple[str | None, frozenset[str]]:
     """The wire name a registration spells and the parameters it excludes, or a loud refusal.
 
@@ -843,6 +843,16 @@ def _registration_arguments(
     ``TypeError`` at the registration itself, so that state never reaches a running server and is
     not decided here.
 
+    The call position holds a SECOND call, the one that applies ``mcp.tool(...)`` to the function,
+    and it is handed over as *applied*. FastMCP 3.4.4 hands every keyword of that call on to the
+    registration, where ``name=``, ``exclude_args=`` and ``enabled=`` override what the
+    registration itself says: probed with a scratch server on 2026-09-23, ``mcp.tool()(fn,
+    name="x")`` put ``x`` on the wire and not the function's name, and ``enabled=False`` there took
+    the tool off the wire. So the applying call is REFUSED when it carries any keyword, a ``**``
+    splat included, or anything but exactly one positional argument. Two shapes that used to end
+    in the unresolved half of :func:`_tool_index`, ``mcp.tool(...)()`` and
+    ``mcp.tool(...)(name_or_fn=fn)``, end here now, in the counting path as well.
+
     REFUSED rather than guessed, in the manner of :func:`_tool_registrations`: a name or an
     exclusion that is not a literal, and a ``**`` splat that may carry either. Guessing the
     function's name there is the defect this reading exists to remove, a tool keyed under a name
@@ -857,6 +867,17 @@ def _registration_arguments(
     if None in keywords:
         unreadable.append(
             f"{where}: a ** splat among the keywords may carry name= or exclude_args="
+        )
+    if applied is not None and applied.keywords:
+        unreadable.append(
+            f"{where}: the call that applies it, {ast.unparse(applied)!r}, carries keywords of "
+            "its own, and FastMCP hands each of them on to the registration, where name=, "
+            "exclude_args= and enabled= override what the registration says"
+        )
+    if applied is not None and len(applied.args) != 1:
+        unreadable.append(
+            f"{where}: the call that applies it, {ast.unparse(applied)!r}, passes "
+            f"{len(applied.args)} positional arguments rather than the one function it registers"
         )
     spellings = [("name=", keywords.get("name"))]
     if not direct:
@@ -904,7 +925,9 @@ def _tool_registrations(tree: ast.Module, label: str) -> tuple[_Registration, ..
     :func:`_direct_registration_target`. One reading serves :func:`_registered_tools` and
     :func:`_tool_index`, so the count and the tools behind it cannot disagree about which forms
     exist. Every form hands its ``mcp.tool`` expression to :func:`_registration_arguments`, so each
-    registration also says which name it takes on the wire and which parameters it drops there.
+    registration also says which name it takes on the wire and which parameters it drops there;
+    the call position hands over the call that applies it as well, whose own arguments FastMCP
+    passes on to the registration.
 
     REFUSED rather than skipped: every other reach for a registrar attribute in *tree*, whatever
     object it hangs off. That covers an alias (``registrar = mcp``), a registrar kept in a variable
@@ -937,7 +960,7 @@ def _tool_registrations(tree: ast.Module, label: str) -> tuple[_Registration, ..
             applied.add(id(node.func))
             argument = node.args[0] if node.args else None
             named = argument.id if isinstance(argument, ast.Name) else None
-            name, excluded = _registration_arguments(node.func, label)
+            name, excluded = _registration_arguments(node.func, label, applied=node)
             registrations.append(_Registration(node.lineno, named, name, excluded))
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and id(node) not in applied and _is_mcp_tool(node):
@@ -1195,9 +1218,19 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
     syntax tree does not know the running order, so an index that let the later-READ one win would
     answer for a tool the wire may not carry. "Different" is judged on module and function name
     together, so two functions of one name in the two registrar modules do not pass as one.
-    ⚠️ The SAME function under the SAME name twice collapses to one entry, which is what the wire
-    keeps; that :func:`_registered_tools` still counts both lines is [GQ-436]'s question, not
+    The SAME function under the SAME name is refused as well when the two registrations exclude
+    different parameters: FastMCP keeps the later-running one WITH its exclusion (probed
+    2026-09-23), and the readers here take a tool's parameters from exactly that exclusion.
+    ⚠️ Two registrations equal in name, function and exclusion collapse to one entry, which is what
+    the wire keeps as far as any reader here looks; their other arguments (``title=``,
+    ``output_schema=``, ``version=`` and the rest) are not compared, because no reader here reads
+    them. That :func:`_registered_tools` still counts both lines is [GQ-436]'s question, not
     decided here.
+
+    A registration whose function its registrar module defines MORE THAN ONCE is refused too: the
+    name could only point at one of the definitions, and :func:`_wire_parameters` would read that
+    one's signature on a guess. ⚠️ Not read: a name bound again after its ``def``, by an
+    assignment or an import. Neither occurs in this package (measured 2026-09-23).
 
     The promise "the name the wire carries" is held twice: on constructed input by
     ``test_the_tool_index_is_keyed_on_the_wire_name``, because no registration in this package
@@ -1207,13 +1240,16 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
     """
     found: dict[str, _RegisteredTool] = {}
     unresolved: list[str] = []
+    ambiguous: list[str] = []
     contested: list[str] = []
     for label, tree in modules:
-        defined = {
-            node.name: node
+        definitions = [
+            node
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        }
+        ]
+        defined = {node.name: node for node in definitions}
+        definition_count = Counter(node.name for node in definitions)
         for registration in _tool_registrations(tree, label):
             name = registration.wire_name
             if (
@@ -1222,6 +1258,12 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
                 or name is None
             ):
                 unresolved.append(f"{label}:{registration.lineno}")
+                continue
+            if definition_count[registration.function] > 1:
+                ambiguous.append(
+                    f"{label}:{registration.lineno}: {registration.function} is defined "
+                    f"{definition_count[registration.function]} times in {label}"
+                )
                 continue
             tool = _RegisteredTool(label, registration, defined[registration.function])
             held = found.get(name)
@@ -1235,6 +1277,14 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
                     f"{tool.function.name}"
                 )
                 continue
+            if held is not None and held.registration.excluded != registration.excluded:
+                contested.append(
+                    f"{name!r}: {held.module}:{held.registration.lineno} and "
+                    f"{label}:{registration.lineno} both register {tool.function.name}, "
+                    f"excluding {sorted(held.registration.excluded)} and "
+                    f"{sorted(registration.excluded)}"
+                )
+                continue
             found[name] = tool
     if unresolved:
         raise AssertionError(
@@ -1242,9 +1292,16 @@ def _tool_index(modules: Iterable[tuple[str, ast.Module]]) -> dict[str, _Registe
             "module, so the tools behind them are counted and then lost, and every set built from "
             f"the functions is short of them without a word: {unresolved}"
         )
+    if ambiguous:
+        raise AssertionError(
+            "a registration names a function its registrar module defines more than once, so the "
+            "signature that reaches the wire depends on scope and running order, and this reading "
+            f"would pick one of them on a guess: {ambiguous}"
+        )
     if contested:
         raise AssertionError(
-            "the same wire name is registered for two different functions, FastMCP keeps whichever "
+            "the same wire name is registered twice in ways that disagree, for two different "
+            "functions or for one function with different exclusions; FastMCP keeps whichever "
             "registration runs later, and a syntax tree cannot say which that is, so every reading "
             f"of that tool would be a guess: {contested}"
         )
@@ -1276,25 +1333,37 @@ def _tool_result_type() -> dict[str, str]:
 def _wire_parameters(tool: _RegisteredTool) -> frozenset[str]:
     """The parameter names *tool* puts on the wire, as far as a syntax tree can say.
 
-    The signature, all three parameter kinds (positional-only, positional-or-keyword,
-    keyword-only) because all three arrive as a property name, MINUS what the registration
-    excludes. ⛔ Until [GQ-433] this was the signature alone, under the sentence "a parameter name
-    is what reaches the wire as a schema property". Measured on 2026-09-16 and again on 2026-09-21
-    in a throwaway copy: ``exclude_args=["context_cap"]`` on the ``find_device`` registration took
-    the property off the wire, the signature kept it, and the guide's sentence about the display
-    tools that take a ``context_cap`` stayed green while it was false.
+    The signature's positional-or-keyword and keyword-only parameters, which both arrive as a
+    property name, MINUS what the registration excludes. A POSITIONAL-ONLY parameter is REFUSED:
+    FastMCP 3.4.4 then advertises an input schema of type ``array`` with ``prefixItems`` and not a
+    single property (probed with a scratch server on 2026-09-23), so counting it would claim a
+    name the wire does not carry. ⛔ Until [GQ-433] this was the signature alone, all three kinds,
+    under the sentence "a parameter name is what reaches the wire as a schema property". Measured on
+    2026-09-16 and again on 2026-09-21 in a throwaway copy: ``exclude_args=["context_cap"]`` on the
+    ``find_device`` registration took the property off the wire, the signature kept it, and the
+    guide's sentence about the display tools that take a ``context_cap`` stayed green while it was
+    false.
 
-    ⚠️ What a syntax tree does NOT subtract: a parameter FastMCP injects rather than advertises, a
-    ``Context``-typed one (probed 2026-09-21: in the signature, absent from the input schema) or a
-    ``Depends()`` default. None exists in this package today, measured the same day: for every
-    registered tool the signature's names equalled the advertised properties. The registrar module
-    is read, not the wire, for the lane reason :func:`_tools_declaring_parameter` gives.
+    ⚠️ What a syntax tree does NOT subtract or rename: a parameter FastMCP injects rather than
+    advertises, a ``Context``-typed one (probed 2026-09-21: in the signature, absent from the input
+    schema) or a ``Depends()`` default (read in FastMCP 3.4.4, not probed); and an alias, which
+    pydantic makes the property name when ``alias=`` or ``validation_alias=`` is a string, in the
+    annotation or in the default (probed 2026-09-23 for ``Field(alias=...)``). None of them occurs
+    in this package: for every registered tool the signature's names equalled the advertised
+    properties (measured 2026-09-21), and neither registrar module carries an alias (measured
+    2026-09-23). The registrar module is read, not the wire, for the lane reason
+    :func:`_tools_declaring_parameter` gives; the wire test holds these limits only in a lane that
+    carries the tool, and CI runs the core lane, where no display tool is on the wire.
     """
     arguments = tool.function.args
+    if arguments.posonlyargs:
+        raise AssertionError(
+            f"{tool.module}:{tool.function.lineno}: {tool.function.name} takes positional-only "
+            "parameters, and FastMCP then advertises an array of positions without a single "
+            "property, so none of its parameters reaches the wire by name"
+        )
     declared = {
-        argument.arg
-        for group in (arguments.posonlyargs, arguments.args, arguments.kwonlyargs)
-        for argument in group
+        argument.arg for group in (arguments.args, arguments.kwonlyargs) for argument in group
     }
     return frozenset(declared - tool.registration.excluded)
 
@@ -3742,21 +3811,25 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
     """[GQ-433]: :func:`_tool_index` on constructed input, because the real tree spells no name.
 
     Not one registration in ``server.py`` or ``display_tools.py`` carries ``name=``, a name in the
-    first slot or ``exclude_args`` (measured 2026-09-21), so on the real tree the wire name IS the
+    first slot or ``exclude_args`` (measured 2026-09-21), and none of the shapes added on
+    2026-09-23 occurs there either (measured that day), so on the real tree the wire name IS the
     function name, nothing is excluded, and every decision held here is inert there: each of them
     would survive its own removal unnoticed, which is how the function-name key survived a repair
     that rebuilt the reader around it. What FastMCP 3.4.4 does with each spelling below was probed
-    with a scratch server the same day; :func:`_registration_arguments` records it.
+    with a scratch server on 2026-09-21 and 2026-09-23; :func:`_registration_arguments`,
+    :func:`_tool_index` and :func:`_wire_parameters` record it.
 
-    RED-PROOF, one per decision: key the index on ``registration.function`` again and every name
-    of ``reader`` but one is gone; drop the exclusion from :func:`_wire_parameters` and
-    ``reader_capless`` takes the cap again; cut the function names against the keys in
-    :func:`_tools_implemented_by` and ``writer_again`` is lost; switch any one refusal off and its
-    shape is reported as not refused.
+    RED-PROOF, one per decision: key the index on ``registration.function`` again and ``reader``
+    and ``reader_capless`` land on one key with different exclusions, which the index refuses; drop
+    the exclusion from :func:`_wire_parameters` and ``reader_capless`` takes the cap again; count
+    no keyword-only parameter and ``reader`` loses its ``context_cap``; cut the function names
+    against the keys in :func:`_tools_implemented_by` and ``writer_again`` is lost; judge a
+    collision on the function name alone and the two modules pass as one; switch any one refusal
+    off and its shape is reported as not refused.
     """
     module = textwrap.dedent(
         """
-        async def reader(query: str, context_cap: int = 0) -> ReaderResult: ...
+        async def reader(query: str, *, context_cap: int = 0) -> ReaderResult: ...
 
         async def writer(text: str) -> None: ...
 
@@ -3787,6 +3860,10 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
     capped = sorted(name for name, tool in index.items() if "context_cap" in _wire_parameters(tool))
     if capped != [name for name in readers if name != "reader_capless"]:
         findings.append(f"exclude_args is not subtracted from the signature: {capped}")
+    reader_tool = index.get("reader")
+    read = sorted(_wire_parameters(reader_tool)) if reader_tool is not None else None
+    if read != ["context_cap", "query"]:
+        findings.append(f"the parameters read for reader are {read}, its keyword-only one included")
     for function, tools in (("reader", readers), ("writer", ["writer", "writer_again"])):
         joined = sorted(_tools_implemented_by(index, frozenset({function})))
         if joined != tools:
@@ -3809,6 +3886,43 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
             'mcp.tool(name="same")(first)\nmcp.tool(name="same")(second)\n',
             "'same'",
         ),
+        (
+            "one function under one name with two exclusions",
+            "async def capped(p: int = 0) -> None: ...\n\n"
+            'mcp.tool(name="same")(capped)\nmcp.tool(name="same", exclude_args=["p"])(capped)\n',
+            "'same'",
+        ),
+        (
+            "a registered function its module defines twice",
+            "async def first(p: int = 0) -> None: ...\n\nmcp.tool()(first)\n",
+            "defined 2 times",
+        ),
+        ("a name on the call that applies it", 'mcp.tool()(first, name="x")\n', "applies it"),
+        (
+            "an exclusion on the call that applies it",
+            'mcp.tool(name="y")(first, exclude_args=["p"])\n',
+            "applies it",
+        ),
+        (
+            "a switch on the call that applies it",
+            "mcp.tool()(first, enabled=False)\n",
+            "applies it",
+        ),
+        (
+            "another keyword on the call that applies it",
+            "mcp.tool()(first, meta={})\n",
+            "applies it",
+        ),
+        (
+            "keywords spread on the call that applies it",
+            "mcp.tool()(first, **OPTIONS)\n",
+            "applies it",
+        ),
+        (
+            "two functions on the call that applies it",
+            "mcp.tool()(first, second)\n",
+            "2 positional",
+        ),
     ):
         try:
             _tool_index([("probe.py", ast.parse(defined + source))])
@@ -3817,6 +3931,29 @@ def test_the_tool_index_is_keyed_on_the_wire_name() -> None:
                 findings.append(f"{shape}: refused without naming where or what: {refusal}")
             continue
         findings.append(f"{shape}: not refused, so the tool is keyed or counted on a guess")
+
+    # A collision judged on the module AND the function: the same function name in the two registrar
+    # modules is two functions, so one wire name for both must be refused, naming both modules.
+    spread = defined + 'mcp.tool(name="same")(first)\n'
+    try:
+        _tool_index([(label, ast.parse(spread)) for label in ("server.py", "display_tools.py")])
+    except AssertionError as refusal:
+        if not all(part in str(refusal) for part in ("server.py:", "display_tools.py:", "'same'")):
+            findings.append(f"one name over two modules: refused without naming where: {refusal}")
+    else:
+        findings.append("one wire name for two functions of one name in two modules: not refused")
+
+    # A positional-only parameter reaches the wire under no name at all, so its tool is refused
+    # where its parameters are read, not where it is registered.
+    early = "async def early(first: str, /) -> None: ...\n\nmcp.tool()(early)\n"
+    positional = _tool_index([("probe.py", ast.parse(early))])
+    try:
+        _wire_parameters(positional["early"])
+    except AssertionError as refusal:
+        if "probe.py:" not in str(refusal) or "positional-only" not in str(refusal):
+            findings.append(f"a positional-only parameter: refused without naming where: {refusal}")
+    else:
+        findings.append("a positional-only parameter: not refused, so it counts as a property")
     assert not findings, "_tool_index misreads a registration:\n  " + "\n  ".join(findings)
 
 
